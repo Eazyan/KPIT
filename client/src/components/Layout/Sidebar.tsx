@@ -93,9 +93,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     } else if (user.role === UserRole.ADMIN) {
       roleSpecificItems = adminMenuItems;
       roleTitle = 'Администратор';
-    } else if (user.role === UserRole.HEAD_OF_DEPARTMENT) {
-      roleSpecificItems = [...teacherMenuItems, ...adminMenuItems.slice(0, -1)];
-      roleTitle = 'Заведующий кафедрой';
     }
   }
   

@@ -159,4 +159,36 @@ export const gradesAPI = {
   },
 };
 
+// Управление расписанием
+export const scheduleAPI = {
+  getAll: async () => {
+    const response = await api.get('/schedule');
+    return response.data;
+  },
+  getByGroup: async (groupId: string) => {
+    const response = await api.get(`/schedule/group/${groupId}`);
+    return response.data;
+  },
+  getByTeacher: async (teacherId: string) => {
+    const response = await api.get(`/schedule/teacher/${teacherId}`);
+    return response.data;
+  },
+  getByDate: async (date: string) => {
+    const response = await api.get(`/schedule/date/${date}`);
+    return response.data;
+  },
+  create: async (scheduleData: any) => {
+    const response = await api.post('/schedule', scheduleData);
+    return response.data;
+  },
+  update: async (id: string, scheduleData: any) => {
+    const response = await api.put(`/schedule/${id}`, scheduleData);
+    return response.data;
+  },
+  delete: async (id: string) => {
+    const response = await api.delete(`/schedule/${id}`);
+    return response.data;
+  },
+};
+
 export default api; 

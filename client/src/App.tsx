@@ -5,6 +5,7 @@ import theme from './styles/theme';
 import { AuthProvider } from './context/AuthContext';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/Auth/LoginPage';
+import SchedulePage from './pages/Schedule';
 import './App.css';
 
 const App: React.FC = () => {
@@ -16,6 +17,7 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/schedule" element={<SchedulePage />} />
             {/* Добавьте здесь другие маршруты */}
           </Routes>
         </Router>
