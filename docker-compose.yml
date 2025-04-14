@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # База данных
+  mongodb:
+    image: mongo:6.0
+    container_name: kpius-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=kpiusdb
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # FastAPI сервер
+  api:
+    build:
+      context: ./fastapi-server
+      dockerfile: Dockerfile
+    container_name: kpius-api
+    ports:
+      - "5005:5005"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - JWT_SECRET=YOUR_SECRET_KEY
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - ALGORITHM=HS256
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+    networks:
+      - kpius-network
+    volumes:
+      - ./fastapi-server:/app
+      - /app/venv
+
+  # Клиент React
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: kpius-client
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  kpius-network:
+    driver: bridge 

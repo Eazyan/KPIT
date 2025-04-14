@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # База данных
+  mongodb:
+    image: mongo:6.0
+    container_name: kpius-mongodb-dev
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data_dev:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=kpiusdb
+    restart: unless-stopped
+    networks:
+      - kpius-network-dev
+
+  # FastAPI сервер в режиме разработки с автоперезагрузкой
+  api:
+    build:
+      context: ./fastapi-server
+      dockerfile: Dockerfile
+    container_name: kpius-api-dev
+    command: uvicorn app.main:app --host 0.0.0.0 --port 5005 --reload
+    ports:
+      - "5005:5005"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - JWT_SECRET=dev_secret_key
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - ALGORITHM=HS256
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+    networks:
+      - kpius-network-dev
+    volumes:
+      - ./fastapi-server:/app
+
+  # Клиент React в режиме разработки
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.dev
+    container_name: kpius-client-dev
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5005/api
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - kpius-network-dev
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+
+volumes:
+  mongodb_data_dev:
+
+networks:
+  kpius-network-dev:
+    driver: bridge 
