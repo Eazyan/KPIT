@@ -1,8 +1,9 @@
 // Типы ролей пользователей
 export enum UserRole {
-  STUDENT = 'STUDENT',
-  TEACHER = 'TEACHER',
-  ADMIN = 'ADMIN'
+  STUDENT = 'student',
+  TEACHER = 'teacher',
+  ADMIN = 'admin',
+  HEAD_OF_DEPARTMENT = 'head_of_department'
 }
 
 // Интерфейс пользователя
@@ -11,38 +12,29 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  token?: string;
   group?: string;
   department?: string;
-}
-
-// Типы для расписания
-export interface LessonSchedule {
-  _id: string;
-  subject: string;
-  type: 'Лекция' | 'Практика' | 'Лабораторная' | 'Семинар' | 'Экзамен' | 'Зачет';
-  time: string;
-  date: string;
-  teacher: string;
-  room: string;
-  group: string;
+  token?: string;
 }
 
 // Интерфейс учебной группы
 export interface Group {
   _id: string;
   name: string;
-  faculty: string;
-  year: number;
+  department: string;
+  specialization: string;
+  course: number;
+  students: string[];
 }
 
 // Интерфейс дисциплины
 export interface Discipline {
   _id: string;
   name: string;
-  teachers: string[];
-  description?: string;
-  faculty: string;
+  teacher: string;
+  semester: number;
+  groups: string[];
+  department: string;
 }
 
 // Типы занятий

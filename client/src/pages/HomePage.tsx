@@ -107,14 +107,7 @@ const HomePage: React.FC = () => {
                             borderRadius: 3,
                             border: '1px solid rgba(0, 0, 0, 0.06)',
                             background: 'rgba(255, 255, 255, 0.5)',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease-in-out',
-                            '&:hover': {
-                              transform: 'translateY(-2px)',
-                              boxShadow: '0 6px 12px rgba(0, 0, 0, 0.05)',
-                            }
                           }}
-                          onClick={() => window.location.href = '/schedule'}
                         >
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <Box>
@@ -226,7 +219,7 @@ const HomePage: React.FC = () => {
           )}
           
           {/* Карточки для преподавателя */}
-          {user.role === UserRole.TEACHER && (
+          {(user.role === UserRole.TEACHER || user.role === UserRole.HEAD_OF_DEPARTMENT) && (
             <Grid container spacing={3}>
               <Grid item xs={12} md={8}>
                 <Card 
@@ -403,8 +396,8 @@ const HomePage: React.FC = () => {
             </Grid>
           )}
           
-          {/* Карточки для заведующего кафедрой */}
-          {(user?.role === UserRole.TEACHER && user?.department) && (
+          {/* Карточки для администратора */}
+          {user.role === UserRole.ADMIN && (
             <Grid container spacing={3}>
               <Grid item xs={12} md={8}>
                 <Card 
