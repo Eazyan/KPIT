@@ -3,7 +3,13 @@ FROM node:16-alpine
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci
+
+RUN npm install --save @types/recharts
+
+# Для режима разработки и горячей перезагрузки
+ENV CHOKIDAR_USEPOLLING=true
+ENV WDS_SOCKET_PORT=0
 
 COPY . .
 

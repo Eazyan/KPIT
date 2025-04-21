@@ -272,4 +272,4 @@ const StudentAttendance: React.FC = () => {
   );
 };
 
-export default StudentAttendance; 
+export default StudentAttendance;  

@@ -6,11 +6,15 @@ import base64
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from bson import ObjectId
+import re
 
 from ...core.database import db, users_collection, groups_collection, disciplines_collection, attendance_collection
 from ...middlewares.auth import get_current_active_user, TokenData, check_roles
 from ...models.user import UserRole
 from ...models.attendance import AttendanceStatus, AttendanceCreate, QRCodeData
+from ...db.mongodb import get_database
+from ...auth.jwt_bearer import JWTBearer, get_current_user
+from ...core.security import decode_token
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -173,7 +177,7 @@ async def get_attendance_records(
         "date": attendance_datetime,
     }))
     
-    logger.info(f"Найдено записей о посещаемости для дисциплины {discipline_id}: {len(all_records)}")
+    logger.info(f"Найдено записей о посещаемости для дисциплины {discipline_id} на дату {attendance_date}: {len(all_records)}")
     for record in all_records:
         logger.info(f"Запись посещаемости: студент={record.get('student_id')}, статус={record.get('status')}, группа студента={record.get('student_group', 'не указана')}")
     
@@ -564,4 +568,461 @@ async def debug_qr_data(
             "success": False,
             "message": f"Ошибка при обработке данных: {str(e)}",
             "qr_data": data
-        } 
+        }
+
+# Отладочный эндпоинт для просмотра и удаления записей о посещаемости
+@router.get("/debug-records", summary="Отладка записей посещаемости")
+async def debug_attendance_records(
+    discipline_id: str = Query(None, description="ID дисциплины"),
+    date_str: str = Query(None, description="Дата занятия (ГГГГ-ММ-ДД)"),
+    current_user: TokenData = Depends(get_current_active_user)
+) -> dict:
+    """
+    Отладочный эндпоинт для просмотра всех записей посещаемости
+    """
+    try:
+        filter_query = {}
+        
+        if discipline_id:
+            filter_query["discipline_id"] = discipline_id
+            
+        if date_str:
+            try:
+                attendance_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                attendance_datetime = datetime.combine(attendance_date, datetime.min.time())
+                filter_query["date"] = attendance_datetime
+            except ValueError:
+                return {"error": "Неверный формат даты, используйте ГГГГ-ММ-ДД"}
+        
+        # Получаем все записи, соответствующие фильтру
+        all_records = list(attendance_collection.find(filter_query))
+        
+        # Форматируем записи для вывода
+        formatted_records = []
+        for record in all_records:
+            try:
+                formatted_record = {
+                    "student_id": str(record.get("student_id")),
+                    "student_id_type": type(record.get("student_id")).__name__,
+                    "discipline_id": str(record.get("discipline_id")),
+                    "date": str(record.get("date")),
+                    "status": record.get("status"),
+                    "updated_at": str(record.get("updated_at")) if record.get("updated_at") else None,
+                    "student_group": record.get("student_group"),
+                    "record_id": str(record.get("_id"))
+                }
+                formatted_records.append(formatted_record)
+            except Exception as e:
+                logger.error(f"Ошибка при форматировании записи: {str(e)}")
+                formatted_records.append({"error": str(e), "record": str(record)})
+        
+        return {
+            "success": True,
+            "total_records": len(formatted_records),
+            "filter": filter_query,
+            "records": formatted_records
+        }
+    except Exception as e:
+        import traceback
+        logger.error(f"Ошибка при отладке записей посещаемости: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {
+            "success": False,
+            "message": f"Ошибка при отладке записей посещаемости: {str(e)}"
+        }
+
+# Отладочный эндпоинт для ручного удаления записи о посещаемости
+@router.delete("/debug-delete-record", summary="Ручное удаление записи о посещаемости")
+async def debug_delete_record(
+    record_id: str = Query(..., description="ID записи в MongoDB"),
+    current_user: TokenData = Depends(get_current_active_user),
+    check_teacher: None = Depends(check_roles([UserRole.TEACHER, UserRole.HEAD_OF_DEPARTMENT, UserRole.ADMIN]))
+) -> dict:
+    """
+    Отладочный эндпоинт для ручного удаления записи по её ID
+    """
+    try:
+        # Проверяем корректность ObjectId
+        try:
+            record_oid = ObjectId(record_id)
+        except:
+            return {
+                "success": False,
+                "message": "Некорректный ID записи"
+            }
+        
+        # Удаляем запись
+        result = attendance_collection.delete_one({"_id": record_oid})
+        
+        if result.deleted_count > 0:
+            return {
+                "success": True,
+                "message": "Запись успешно удалена"
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Запись не найдена"
+            }
+    except Exception as e:
+        import traceback
+        logger.error(f"Ошибка при удалении записи: {str(e)}")
+        logger.error(traceback.format_exc())
+        return {
+            "success": False,
+            "message": f"Ошибка при удалении записи: {str(e)}"
+        }
+
+# Удаление записи о посещаемости
+@router.delete("/record", summary="Удаление записи о посещаемости")
+async def delete_attendance_record(
+    student_id: str = Query(..., description="ID студента"),
+    discipline_id: str = Query(..., description="ID дисциплины"),
+    attendance_date: date = Query(..., description="Дата занятия (ГГГГ-ММ-ДД)"),
+    current_user: TokenData = Depends(get_current_active_user),
+    check_teacher: None = Depends(check_roles([UserRole.TEACHER, UserRole.HEAD_OF_DEPARTMENT]))
+) -> dict:
+    """
+    Удаление записи о посещаемости студента
+    """
+    logger.info(f"Запрос на удаление записи посещаемости: студент={student_id}, дисциплина={discipline_id}, дата={attendance_date}")
+    
+    try:
+        # Формируем дату для поиска
+        attendance_datetime = datetime.combine(attendance_date, datetime.min.time())
+        
+        # Создаем фильтр для поиска всех записей для заданной дисциплины и даты
+        base_filter = {
+            "discipline_id": discipline_id,
+            "date": attendance_datetime
+        }
+        
+        # Получаем все записи для этой дисциплины и даты
+        all_records = list(attendance_collection.find(base_filter))
+        logger.info(f"Найдено записей для дисциплины {discipline_id} на дату {attendance_date}: {len(all_records)}")
+        
+        # Ищем запись, связанную с искомым студентом
+        matching_records = []
+        for record in all_records:
+            record_student_id = record.get("student_id")
+            try:
+                # Преобразуем оба ID к строке для сравнения
+                record_student_id_str = str(record_student_id)
+                if record_student_id_str == student_id:
+                    matching_records.append(record)
+                    logger.info(f"Найдена запись для студента {student_id} с ID типа {type(record_student_id).__name__}")
+            except Exception as e:
+                logger.error(f"Ошибка при сравнении ID студента: {str(e)}")
+                
+        if not matching_records:
+            logger.warning(f"Записи о посещаемости для студента {student_id} не найдены")
+            return {
+                "success": False,
+                "message": "Запись о посещаемости не найдена"
+            }
+            
+        # Берем первую найденную запись для удаления
+        record_to_delete = matching_records[0]
+        record_id = record_to_delete.get("_id")
+        
+        # Удаляем запись по её ID (самый надежный способ)
+        result = attendance_collection.delete_one({"_id": record_id})
+        
+        if result.deleted_count > 0:
+            logger.info(f"Запись о посещаемости успешно удалена: ID записи={record_id}")
+            return {
+                "success": True,
+                "message": "Запись о посещаемости успешно удалена"
+            }
+        else:
+            logger.warning(f"Запись о посещаемости не удалена: ID записи={record_id}")
+            return {
+                "success": False,
+                "message": "Не удалось удалить запись о посещаемости"
+            }
+    
+    except Exception as e:
+        import traceback
+        logger.error(f"Ошибка при удалении записи о посещаемости: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при удалении записи о посещаемости: {str(e)}"
+        )
+
+# Новый метод удаления записи о посещаемости
+@router.delete("/delete-attendance", summary="Прямое удаление записи о посещаемости")
+async def direct_delete_attendance(
+    student_id: str,
+    discipline_id: str,
+    attendance_date: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        logger.info(f"Запрос на удаление записи посещаемости: student_id={student_id}, discipline_id={discipline_id}, date={attendance_date}")
+        
+        # Проверка прав доступа
+        if current_user["role"] != "teacher" and current_user["role"] != "admin":
+            logger.warning(f"Недостаточно прав для удаления записи. Роль пользователя: {current_user['role']}")
+            raise HTTPException(status_code=403, detail="Недостаточно прав для этой операции")
+        
+        # Преобразуем ID студента в разные форматы для более гибкого поиска
+        student_id_str = str(student_id)
+        logger.info(f"Поиск записей для студента ID (строка): {student_id_str}")
+        
+        try:
+            student_id_obj = ObjectId(student_id)
+            logger.info(f"Сконвертированный ObjectId студента: {student_id_obj}")
+        except:
+            student_id_obj = None
+            logger.info(f"Не удалось сконвертировать ID студента в ObjectId")
+        
+        attendance_collection = db["attendance"]
+        
+        # Создаем список всех возможных запросов для поиска записи
+        possible_queries = []
+        
+        # 1. Стандартный формат (основной)
+        possible_queries.append({
+            "student_id": student_id_str,
+            "discipline_id": discipline_id,
+            "date": attendance_date
+        })
+        
+        # 2. Альтернативные имена полей
+        possible_queries.append({
+            "studentId": student_id_str,
+            "discipline_id": discipline_id,
+            "date": attendance_date
+        })
+        
+        # 3. Если student_id может быть ObjectId
+        if student_id_obj:
+            possible_queries.append({
+                "student_id": student_id_obj,
+                "discipline_id": discipline_id,
+                "date": attendance_date
+            })
+            possible_queries.append({
+                "studentId": student_id_obj,
+                "discipline_id": discipline_id,
+                "date": attendance_date
+            })
+        
+        # 4. Проверка на случай, если discipline_id может быть ObjectId
+        try:
+            discipline_id_obj = ObjectId(discipline_id)
+            logger.info(f"Сконвертированный ObjectId дисциплины: {discipline_id_obj}")
+            
+            possible_queries.append({
+                "student_id": student_id_str,
+                "discipline_id": discipline_id_obj,
+                "date": attendance_date
+            })
+            possible_queries.append({
+                "studentId": student_id_str,
+                "discipline_id": discipline_id_obj,
+                "date": attendance_date
+            })
+            
+            # Комбинации с ObjectId для студента и дисциплины
+            if student_id_obj:
+                possible_queries.append({
+                    "student_id": student_id_obj,
+                    "discipline_id": discipline_id_obj,
+                    "date": attendance_date
+                })
+                possible_queries.append({
+                    "studentId": student_id_obj,
+                    "discipline_id": discipline_id_obj,
+                    "date": attendance_date
+                })
+        except:
+            logger.info(f"Не удалось сконвертировать ID дисциплины в ObjectId")
+        
+        # Логируем все созданные запросы
+        for i, query in enumerate(possible_queries):
+            logger.info(f"Поисковый запрос #{i+1}: {query}")
+        
+        # Ищем записи
+        all_records = []
+        for query in possible_queries:
+            found = list(attendance_collection.find(query))
+            logger.info(f"Найдено {len(found)} записей по запросу {query}")
+            all_records.extend(found)
+        
+        # Удаляем дубликаты по _id
+        unique_records = {}
+        for record in all_records:
+            record_id = str(record["_id"])
+            if record_id not in unique_records:
+                unique_records[record_id] = record
+        
+        unique_records_list = list(unique_records.values())
+        logger.info(f"Найдено {len(unique_records_list)} уникальных записей")
+        
+        # Логируем все найденные записи
+        for idx, record in enumerate(unique_records_list):
+            logger.info(f"Найденная запись #{idx+1}: {record}")
+        
+        # Непосредственно удаление записей
+        delete_count = 0
+        delete_ids = []
+        
+        for record in unique_records_list:
+            record_id = record["_id"]
+            result = attendance_collection.delete_one({"_id": record_id})
+            if result.deleted_count > 0:
+                delete_count += 1
+                delete_ids.append(str(record_id))
+                logger.info(f"Успешно удалена запись с ID: {record_id}")
+            else:
+                logger.warning(f"Не удалось удалить запись с ID: {record_id}")
+        
+        # Возвращаем результат
+        if delete_count > 0:
+            logger.info(f"Удалено {delete_count} записей: {delete_ids}")
+            return {
+                "success": True,
+                "message": f"Успешно удалено {delete_count} записей о посещаемости",
+                "deleted_count": delete_count,
+                "deleted_ids": delete_ids
+            }
+        else:
+            # Если записи не найдены, делаем последнюю попытку - поиск с использованием регулярных выражений
+            logger.warning("Записи не найдены стандартными методами, пробуем поиск с регулярными выражениями")
+            
+            regex_query = {
+                "$or": [
+                    {"student_id": {"$regex": f"^{re.escape(student_id_str)}$", "$options": "i"}},
+                    {"studentId": {"$regex": f"^{re.escape(student_id_str)}$", "$options": "i"}}
+                ],
+                "$and": [
+                    {
+                        "$or": [
+                            {"discipline_id": {"$regex": f"^{re.escape(discipline_id)}$", "$options": "i"}},
+                            {"disciplineId": {"$regex": f"^{re.escape(discipline_id)}$", "$options": "i"}}
+                        ]
+                    },
+                    {
+                        "$or": [
+                            {"date": {"$regex": f"^{re.escape(attendance_date)}$", "$options": "i"}},
+                            {"attendance_date": {"$regex": f"^{re.escape(attendance_date)}$", "$options": "i"}}
+                        ]
+                    }
+                ]
+            }
+            
+            logger.info(f"Регулярное выражение для поиска: {regex_query}")
+            
+            regex_found = list(attendance_collection.find(regex_query))
+            logger.info(f"Найдено {len(regex_found)} записей с использованием регулярных выражений")
+            
+            for idx, record in enumerate(regex_found):
+                logger.info(f"Найденная с регулярным выражением запись #{idx+1}: {record}")
+                record_id = record["_id"]
+                result = attendance_collection.delete_one({"_id": record_id})
+                if result.deleted_count > 0:
+                    delete_count += 1
+                    delete_ids.append(str(record_id))
+                    logger.info(f"Успешно удалена запись с регулярным выражением, ID: {record_id}")
+            
+            if delete_count > 0:
+                return {
+                    "success": True,
+                    "message": f"Успешно удалено {delete_count} записей о посещаемости с использованием регулярных выражений",
+                    "deleted_count": delete_count,
+                    "deleted_ids": delete_ids
+                }
+            else:
+                logger.warning(f"Записи посещаемости не найдены ни одним из методов")
+                return {
+                    "success": False,
+                    "message": "Записи посещаемости не найдены"
+                }
+            
+    except Exception as e:
+        error_msg = f"Ошибка при удалении записи о посещаемости: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_msg)
+
+# Добавляем отладочный эндпоинт для просмотра записей о посещаемости
+@router.get("/debug-attendance", summary="Просмотр записей о посещаемости для отладки")
+async def debug_attendance(
+    student_id: str = Query(None, description="ID студента"),
+    discipline_id: str = Query(None, description="ID дисциплины"),
+    attendance_date: str = Query(None, description="Дата занятия (ГГГГ-ММ-ДД)"),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        logger.info(f"Отладочный запрос на просмотр записей: student_id={student_id}, discipline_id={discipline_id}, date={attendance_date}")
+        
+        attendance_collection = db["attendance"]
+        
+        # Создаем фильтр в зависимости от указанных параметров
+        filter_query = {}
+        
+        if discipline_id:
+            filter_query["discipline_id"] = discipline_id
+        
+        if attendance_date:
+            filter_query["date"] = attendance_date
+            
+        # Ищем записи согласно фильтру
+        result = list(attendance_collection.find(filter_query))
+        logger.info(f"Найдено {len(result)} записей по фильтру: {filter_query}")
+        
+        # Если указан ID студента, пробуем найти его записи
+        if student_id:
+            student_records = []
+            student_id_str = str(student_id)
+            try:
+                student_id_obj = ObjectId(student_id)
+            except:
+                student_id_obj = None
+                
+            for record in result:
+                record_student_id = record.get("studentId", record.get("student_id"))
+                if record_student_id and str(record_student_id) == student_id_str:
+                    student_records.append(record)
+                elif student_id_obj and isinstance(record_student_id, ObjectId) and record_student_id == student_id_obj:
+                    student_records.append(record)
+                    
+            logger.info(f"Найдено {len(student_records)} записей для студента {student_id}")
+            return {
+                "total_records": len(result),
+                "student_records": len(student_records),
+                "records": [
+                    {
+                        "_id": str(record.get("_id")),
+                        "studentId": str(record.get("studentId", record.get("student_id", ""))),
+                        "discipline_id": record.get("discipline_id", ""),
+                        "date": record.get("date", ""),
+                        "status": record.get("status", ""),
+                        "created_at": record.get("created_at", ""),
+                    } for record in student_records
+                ],
+                "raw_records": str(student_records)
+            }
+        
+        # Если ID студента не указан, возвращаем все найденные записи
+        return {
+            "total_records": len(result),
+            "records": [
+                {
+                    "_id": str(record.get("_id")),
+                    "studentId": str(record.get("studentId", record.get("student_id", ""))),
+                    "discipline_id": record.get("discipline_id", ""),
+                    "date": record.get("date", ""),
+                    "status": record.get("status", ""),
+                    "created_at": record.get("created_at", ""),
+                } for record in result[:20]  # Ограничиваем вывод 20 записями
+            ]
+        }
+            
+    except Exception as e:
+        error_msg = f"Ошибка при отладке записей посещаемости: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_msg) 

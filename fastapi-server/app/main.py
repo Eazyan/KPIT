@@ -5,7 +5,8 @@ from fastapi.staticfiles import StaticFiles
 import os
 from dotenv import load_dotenv
 
-from .api.routes import auth, attendance
+# Импортируем нужные модули, включая grades
+from .api.routes import auth, attendance, grades
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -41,6 +42,7 @@ app.add_middleware(
 # Подключение маршрутов
 app.include_router(auth.router, prefix="/api/auth", tags=["Аутентификация"])
 app.include_router(attendance.router, prefix="/api/attendance", tags=["Посещаемость"])
+app.include_router(grades.router, prefix="/api/grades", tags=["Успеваемость"])
 
 # Пользовательский путь к API документации
 @app.get("/api/docs", include_in_schema=False)

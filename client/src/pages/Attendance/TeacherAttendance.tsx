@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Container, 
   Typography, 
@@ -21,12 +21,27 @@ import {
   DialogActions,
   IconButton,
   SelectChangeEvent,
-  CircularProgress
+  CircularProgress,
+  Tooltip,
+  Alert
 } from '@mui/material';
-import { Close, QrCode2 } from '@mui/icons-material';
+import { 
+  Close, 
+  QrCode2, 
+  DeleteOutline, 
+  CheckCircleOutline, 
+  RadioButtonUnchecked, 
+  BugReport, 
+  QuestionMark, 
+  Sick, 
+  LocalHospital,
+  Visibility
+} from '@mui/icons-material';
 import { QRCodeCanvas } from 'qrcode.react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import Swal from 'sweetalert2';
+import { FaTrash } from 'react-icons/fa';
 
 // Интерфейс для типизации записи посещаемости с сервера
 interface AttendanceServerRecord {
@@ -58,6 +73,11 @@ interface AttendanceRecord {
   status: string;
 }
 
+// Типы для sweetalert2
+declare module 'sweetalert2';
+// Типы для react-icons/fa
+declare module 'react-icons/fa';
+
 const TeacherAttendance: React.FC = () => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -71,7 +91,21 @@ const TeacherAttendance: React.FC = () => {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Состояния для управления диалогом подтверждения удаления
+  const [openDeleteDialog, setOpenDeleteDialog] = useState<boolean>(false);
+  const [studentToDelete, setStudentToDelete] = useState<string | null>(null);
+  
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  
   const navigate = useNavigate();
+
+  const [loadingStudents, setLoadingStudents] = useState<Record<string, boolean>>({});
+  // Маппинг для хранения ID и статусов студентов для быстрого доступа
+  const [studentStatusMap, setStudentStatusMap] = useState<Map<string, string>>(new Map());
+
+  // Флаг, который указывает, что данные были загружены хотя бы один раз
+  const [initialDataLoaded, setInitialDataLoaded] = useState<boolean>(false);
 
   // Загрузка групп при монтировании компонента
   useEffect(() => {
@@ -83,12 +117,20 @@ const TeacherAttendance: React.FC = () => {
         setGroups(response.data);
       } catch (error) {
         console.error('Ошибка при загрузке групп:', error);
+        setError('Не удалось загрузить список групп');
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchGroups();
+
+    // Очистка при размонтировании
+    return () => {
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current);
+      }
+    };
   }, []);
 
   // Загрузка предметов при выборе группы
@@ -98,14 +140,45 @@ const TeacherAttendance: React.FC = () => {
       
       try {
         setIsLoading(true);
+        console.log(`Начало загрузки предметов для группы: ${selectedGroup}`);
+        
         const response = await api.get(`/attendance/disciplines?group_id=${selectedGroup}`);
-        setSubjects(response.data);
+        console.log('Полученные предметы:', response.data);
+        
+        if (Array.isArray(response.data) && response.data.length > 0) {
+          setSubjects(response.data);
+          
+          // Проверяем, есть ли предмет "Программирование" или похожие в списке
+          const programmingSubjects = response.data.filter(subject => 
+            subject.name.toLowerCase().includes('програм') || 
+            subject.name.toLowerCase().includes('program')
+          );
+          
+          if (programmingSubjects.length > 0) {
+            console.log('Найдены предметы программирования:', programmingSubjects);
+          }
+        } else {
+          console.warn('Получен пустой список предметов для группы:', selectedGroup);
+          setError('Нет доступных предметов для выбранной группы');
+        }
       } catch (error) {
         console.error('Ошибка при загрузке предметов:', error);
+        setError('Не удалось загрузить список предметов');
       } finally {
         setIsLoading(false);
       }
     };
+
+    // Сбросим выбранный предмет при смене группы
+    setSelectedSubject('');
+    // Сбросим данные о посещаемости
+    setAttendanceRecords([]);
+    // Сбросим данные о студентах
+    setStudents([]);
+    // Сбросим карту статусов
+    setStudentStatusMap(new Map());
+    // Сбросим флаг загрузки данных
+    setInitialDataLoaded(false);
 
     fetchSubjects();
   }, [selectedGroup]);
@@ -120,24 +193,55 @@ const TeacherAttendance: React.FC = () => {
         const selectedGroupObj = groups.find(g => g.id === selectedGroup);
         if (!selectedGroupObj) {
           console.error('Группа не найдена по ID:', selectedGroup);
+          console.error('Доступные группы:', groups);
           setIsLoading(false);
           return;
         }
         
         const groupName = selectedGroupObj.name;
         console.log('Загрузка студентов для группы:', groupName);
+        console.log('API URL:', `/attendance/students?group_name=${encodeURIComponent(groupName)}`);
         
-        const response = await api.get(`/attendance/students?group_name=${groupName}`);
-        console.log('Получены студенты:', response.data);
+        const response = await api.get(`/attendance/students?group_name=${encodeURIComponent(groupName)}`);
+        console.log('Получены студенты, сырые данные:', response.data);
         
-        // Убедимся, что ID студентов всегда строки
-        setStudents(response.data.map((student: any) => ({
+        if (!Array.isArray(response.data)) {
+          console.error('Полученные данные не являются массивом:', response.data);
+          setError('Данные о студентах имеют неверный формат');
+          setIsLoading(false);
+          return;
+        }
+        
+        if (response.data.length === 0) {
+          console.warn('Получен пустой список студентов для группы:', groupName);
+          setError(`Нет доступных студентов для группы ${groupName}`);
+        }
+        
+        // Инициализируем студентов с состоянием "отсутствует" по умолчанию
+        const loadedStudents = response.data.map((student: any) => ({
           ...student,
-          id: student.id.toString(),  // Гарантированно строка
+          id: student.id.toString(),
           status: 'Н'  // Н - отсутствует (по умолчанию)
-        })));
-      } catch (error) {
+        }));
+        
+        console.log('Подготовленные данные о студентах:', loadedStudents);
+        setStudents(loadedStudents);
+        
+        // Инициализируем карту статусов
+        const newStatusMap = new Map<string, string>();
+        loadedStudents.forEach((student: Student) => {
+          newStatusMap.set(student.id, 'Н');
+        });
+        setStudentStatusMap(newStatusMap);
+        console.log('Карта статусов инициализирована для', loadedStudents.length, 'студентов');
+        
+      } catch (error: any) {
         console.error('Ошибка при загрузке студентов:', error);
+        if (error.response) {
+          console.error('Данные ответа API:', error.response.data);
+          console.error('Статус ответа API:', error.response.status);
+        }
+        setError('Не удалось загрузить список студентов');
       } finally {
         setIsLoading(false);
       }
@@ -147,128 +251,203 @@ const TeacherAttendance: React.FC = () => {
   }, [selectedGroup, groups]);
 
   // Функция для загрузки данных о посещаемости
-  const fetchAttendance = async () => {
-    if (!selectedGroup || !selectedSubject || !selectedDate) return;
+  const fetchAttendance = async (showLoading = true) => {
+    if (!selectedGroup || !selectedSubject || !selectedDate) {
+      console.warn(`Не все параметры заданы для загрузки посещаемости:
+        - Группа: ${selectedGroup || 'не выбрана'}
+        - Предмет: ${selectedSubject || 'не выбран'}
+        - Дата: ${selectedDate || 'не выбрана'}
+      `);
+      return;
+    }
+    
+    if (showLoading) {
+      setIsLoading(true);
+    }
     
     try {
-      setIsLoading(true);
-      // Получаем имя группы по ID
+      setError(null);
+      
+      // Найдем информацию о группе для формирования запроса
       const selectedGroupObj = groups.find(g => g.id === selectedGroup);
       if (!selectedGroupObj) {
-        console.error('Группа не найдена по ID:', selectedGroup);
-        setIsLoading(false);
+        console.error('Группа не найдена для запроса посещаемости:', selectedGroup);
+        setError('Ошибка: группа не найдена');
+        return;
+      }
+      
+      // Проверяем, существует ли выбранный предмет
+      const selectedSubjectObj = subjects.find(s => s.id === selectedSubject);
+      if (!selectedSubjectObj) {
+        console.error('Предмет не найден для запроса посещаемости:', selectedSubject);
+        console.error('Доступные предметы:', subjects);
+        setError('Ошибка: предмет не найден');
         return;
       }
       
       const groupName = selectedGroupObj.name;
-      console.log('Запрос посещаемости для группы:', groupName, 'дисциплины:', selectedSubject, 'даты:', selectedDate);
-      const response = await api.get(`/attendance/records`, {
-        params: {
-          group_name: groupName, // Используем имя группы вместо ID
-          discipline_id: selectedSubject,
-          attendance_date: selectedDate
+      console.log(`Загрузка посещаемости: группа=${groupName}, предмет=${selectedSubjectObj.name}, дата=${selectedDate}`);
+      
+      // Сохраняем текущую карту статусов перед запросом
+      const currentStatusMap = new Map(studentStatusMap);
+      
+      const apiUrl = '/attendance/records';
+      const params = {
+        group_name: encodeURIComponent(groupName),
+        discipline_id: selectedSubject,
+        attendance_date: selectedDate
+      };
+      
+      console.log('API запрос:', apiUrl);
+      console.log('Параметры запроса:', params);
+      
+      const response = await api.get(apiUrl, { params });
+      
+      console.log('Полный ответ API:', response);
+      console.log('Структура данных в ответе:', Object.keys(response.data));
+      
+      // Универсальная обработка ответа от сервера
+      let attendanceRecords = [];
+      
+      // Проверяем разные возможные форматы данных в ответе
+      if (response.data.records && Array.isArray(response.data.records)) {
+        attendanceRecords = response.data.records;
+        console.log('Получены записи из поля records:', attendanceRecords);
+      } else if (response.data.students && Array.isArray(response.data.students)) {
+        attendanceRecords = response.data.students;
+        console.log('Получены записи из поля students:', attendanceRecords);
+      } else {
+        console.warn('Данные о посещаемости не найдены в ответе. Доступные поля:', Object.keys(response.data));
+        // Устанавливаем флаг, что данные загружены хотя бы один раз
+        setInitialDataLoaded(true);
+        if (showLoading) {
+          setIsLoading(false);
         }
+        return;
+      }
+      
+      // Обновляем только те статусы, которые пришли с сервера
+      // Для остальных студентов сохраняем текущий статус
+      const newStatusMap = new Map(currentStatusMap);
+      
+      attendanceRecords.forEach((record: AttendanceServerRecord) => {
+        if (!record.student_id) {
+          console.warn('Запись посещаемости без ID студента:', record);
+          return;
+        }
+        
+        const studentId = record.student_id;
+        const status = record.status;
+        console.log(`Обновление статуса студента ${studentId}: ${status}`);
+        newStatusMap.set(studentId, status);
       });
       
-      console.log('Получен ответ о посещаемости:', response.data);
-      
-      if (response.data && response.data.students && response.data.students.length > 0) {
-        console.log('Найдено', response.data.students.length, 'записей о посещаемости');
+      if (newStatusMap.size > 0) {
+        console.log('Обновленная карта статусов:', Object.fromEntries(newStatusMap));
+        setStudentStatusMap(newStatusMap);
         
-        // Отладочная информация для диагностики проблемы с ID
-        console.log('Имеющиеся студенты:');
-        students.forEach(student => {
-          console.log(`- ${student.fullName} [ID клиента: ${student.id}]`);
-        });
-        
-        console.log('Записи посещаемости:');
-        response.data.students.forEach((record: AttendanceServerRecord) => {
-          console.log(`- ${record.fullName || record.name} [ID сервера: ${record.student_id}]`);
-        });
-        
-        // Создаем карту записей посещаемости для быстрого поиска
-        const attendanceMap = new Map<string, AttendanceServerRecord>();
-        response.data.students.forEach((record: AttendanceServerRecord) => {
-          attendanceMap.set(record.student_id, record);
-        });
-        
-        // Обновляем статусы студентов из полученных данных
-        const updatedStudents = students.map(student => {
-          // Ищем запись в карте для этого студента
-          const record = attendanceMap.get(student.id);
-          
-          let newStatus = 'Н'; // По умолчанию - отсутствует
-          if (record) {
-            newStatus = record.status;
-            console.log(`✅ Найдено соответствие для ${student.fullName} - статус: ${newStatus}`);
-          } else {
-            console.log(`❌ Не найдено соответствие для ${student.fullName} с ID: ${student.id}`);
-          }
-          
-          return {
-            ...student,
-            status: newStatus
-          };
-        });
-        
-        console.log('Обновленный список студентов:', updatedStudents);
-        setStudents(updatedStudents);
+        // Обновляем статусы в списке студентов
+        setStudents(prevStudents => 
+          prevStudents.map(student => {
+            // Если есть статус в новой карте - используем его
+            if (newStatusMap.has(student.id)) {
+              return { ...student, status: newStatusMap.get(student.id) };
+            }
+            // Иначе сохраняем текущий статус
+            return student;
+          })
+        );
         
         // Обновляем записи о посещаемости
-        const newAttendanceRecords = response.data.students.map((record: AttendanceServerRecord) => ({
-          studentId: record.student_id,
-          status: record.status
-        }));
-        console.log('Новые записи посещаемости:', newAttendanceRecords);
-        setAttendanceRecords(newAttendanceRecords);
+        const attendanceData = attendanceRecords
+          .filter((record: AttendanceServerRecord) => record.student_id) // Фильтруем записи без ID
+          .map((record: AttendanceServerRecord) => ({
+            studentId: record.student_id,
+            status: record.status
+          }));
+        
+        setAttendanceRecords(attendanceData);
+        console.log('Обновлены записи о посещаемости:', attendanceData);
       } else {
-        console.log('Нет данных о посещаемости или пустой список студентов', response.data);
+        console.warn('Не найдено данных для обновления статусов студентов');
       }
-    } catch (error) {
+      
+      // Устанавливаем флаг, что данные загружены хотя бы один раз
+      setInitialDataLoaded(true);
+      
+    } catch (error: any) {
       console.error('Ошибка при загрузке данных о посещаемости:', error);
+      
+      if (error.response) {
+        console.error('Данные ответа:', error.response.data);
+        console.error('Статус ответа:', error.response.status);
+        console.error('Заголовки ответа:', error.response.headers);
+        
+        if (error.response.status === 404) {
+          setError('Данные о посещаемости не найдены для выбранных параметров');
+        } else {
+          setError(`Ошибка сервера: ${error.response.status} - ${error.response.data?.detail || 'Неизвестная ошибка'}`);
+        }
+      } else {
+        setError('Ошибка при загрузке данных о посещаемости');
+      }
     } finally {
-      setIsLoading(false);
+      if (showLoading) {
+        setIsLoading(false);
+      }
     }
   };
 
   // Загрузка посещаемости при выборе даты, группы и предмета
   useEffect(() => {
-    if (students.length > 0) {
-      fetchAttendance();
+    if (selectedGroup && selectedSubject && selectedDate && students.length > 0) {
+      console.log(`Запускаем обновление данных посещаемости на основе изменений параметров:
+        - Группа: ${selectedGroup}
+        - Предмет: ${selectedSubject}
+        - Дата: ${selectedDate}
+        - Кол-во студентов: ${students.length}
+      `);
+      fetchAttendance(true);
+    } else {
+      console.log(`Не удается запустить обновление посещаемости. Проверьте параметры:
+        - Группа: ${selectedGroup || 'не выбрана'}
+        - Предмет: ${selectedSubject || 'не выбран'}
+        - Дата: ${selectedDate || 'не выбрана'}
+        - Кол-во студентов: ${students.length}
+      `);
     }
   }, [selectedGroup, selectedSubject, selectedDate, students.length]);
 
   // Настройка автоматического обновления
   useEffect(() => {
-    // Очистка предыдущего таймера
     if (autoRefreshRef.current) {
       clearInterval(autoRefreshRef.current);
       autoRefreshRef.current = null;
     }
 
-    // Создание нового таймера только когда все данные выбраны
-    if (selectedGroup && selectedSubject && selectedDate) {
+    if (selectedGroup && selectedSubject && selectedDate && initialDataLoaded) {
+      console.log('Настройка интервала автообновления');
+      
       autoRefreshRef.current = setInterval(() => {
-        console.log('Автоматическое обновление данных посещаемости...');
-        fetchAttendance();
-      }, 5000); // Обновление каждые 5 секунд
+        console.log(`[${new Date().toLocaleTimeString()}] Автоматическое обновление данных посещаемости...`);
+        fetchAttendance(false);
+      }, 3000);
     }
 
-    // Очистка таймера при размонтировании компонента
     return () => {
       if (autoRefreshRef.current) {
         clearInterval(autoRefreshRef.current);
       }
     };
-  }, [selectedGroup, selectedSubject, selectedDate]);
+  }, [selectedGroup, selectedSubject, selectedDate, initialDataLoaded, fetchAttendance]);
 
   // Обработчики изменения выбранных значений
   const handleGroupChange = (event: SelectChangeEvent) => {
     setSelectedGroup(event.target.value);
-    setSelectedSubject('');
   };
 
   const handleSubjectChange = (event: SelectChangeEvent) => {
+    console.log(`Изменение выбранного предмета на: ${event.target.value}`);
     setSelectedSubject(event.target.value);
   };
 
@@ -278,46 +457,115 @@ const TeacherAttendance: React.FC = () => {
 
   // Обработчик изменения статуса студента
   const handleStatusChange = (studentId: string, newStatus: string) => {
+    console.log(`Изменение статуса студента ${studentId}: ${newStatus}`);
+    
+    // Обновляем карту статусов
+    const updatedMap = new Map(studentStatusMap);
+    updatedMap.set(studentId, newStatus);
+    setStudentStatusMap(updatedMap);
+    
     // Обновляем список студентов
-    const updatedStudents = students.map(student => 
-      student.id === studentId ? { ...student, status: newStatus } : student
+    setStudents(prevStudents => 
+      prevStudents.map(student => 
+        student.id === studentId ? { ...student, status: newStatus } : student
+      )
     );
-    setStudents(updatedStudents);
     
     // Обновляем записи о посещаемости
     const existingRecordIndex = attendanceRecords.findIndex(record => record.studentId === studentId);
     
     if (existingRecordIndex !== -1) {
-      const updatedRecords = [...attendanceRecords];
-      updatedRecords[existingRecordIndex] = { ...updatedRecords[existingRecordIndex], status: newStatus };
-      setAttendanceRecords(updatedRecords);
+      setAttendanceRecords(prevRecords => {
+        const updatedRecords = [...prevRecords];
+        updatedRecords[existingRecordIndex] = { ...updatedRecords[existingRecordIndex], status: newStatus };
+        return updatedRecords;
+      });
     } else {
-      setAttendanceRecords([...attendanceRecords, { studentId, status: newStatus }]);
+      setAttendanceRecords(prevRecords => [...prevRecords, { studentId, status: newStatus }]);
+    }
+    
+    // Автоматически сохраняем изменения на сервере
+    saveAttendanceStatus(studentId, newStatus);
+  };
+
+  // Функция для сохранения статуса посещаемости одного студента
+  const saveAttendanceStatus = async (studentId: string, status: string) => {
+    if (!selectedSubject || !selectedDate) {
+      console.error('Невозможно сохранить статус: не выбраны предмет или дата');
+      setError('Выберите предмет и дату');
+      return;
+    }
+    
+    try {
+      console.log(`Сохранение статуса для студента ${studentId}: ${status}`);
+      
+      const record = {
+        student_id: studentId,
+        discipline_id: selectedSubject,
+        date: selectedDate,
+        status: status
+      };
+      
+      // Отправляем запрос на сервер для сохранения статуса
+      await api.post('/attendance/update', [record]);
+      console.log('Статус успешно сохранен на сервере');
+      
+      // Показываем кратковременное уведомление об успехе
+      setSuccess('Статус студента обновлен');
+      
+      // Скрываем уведомление через 2 секунды
+      setTimeout(() => {
+        setSuccess(null);
+      }, 2000);
+      
+    } catch (error: any) {
+      console.error('Ошибка при сохранении статуса:', error);
+      
+      if (error.response) {
+        console.error('Данные ответа:', error.response.data);
+        console.error('Статус ответа:', error.response.status);
+      }
+      
+      setError('Не удалось сохранить статус студента');
     }
   };
 
   // Сохранение данных о посещаемости
   const handleSaveAttendance = async () => {
     if (!selectedGroup || !selectedSubject || !selectedDate) {
-      alert('Выберите группу, предмет и дату');
+      setError('Выберите группу, предмет и дату');
       return;
     }
     
     try {
       setIsLoading(true);
-      await api.post('/attendance/update', 
-        attendanceRecords.map(record => ({
-          student_id: record.studentId,
+      
+      // Создаем массив записей на основе актуальных статусов из карты
+      const recordsToSave = Array.from(studentStatusMap.entries())
+        .map(([studentId, status]) => ({
+          student_id: studentId,
           discipline_id: selectedSubject,
           date: selectedDate,
-          status: record.status
-        }))
-      );
+          status: status
+        }));
       
-      alert('Данные о посещаемости сохранены');
-    } catch (error) {
+      console.log('Отправляем данные о посещаемости:', recordsToSave);
+      
+      await api.post('/attendance/update', recordsToSave);
+      
+      setSuccess('Данные о посещаемости сохранены');
+      
+      // Обновляем данные с сервера
+      fetchAttendance(false);
+    } catch (error: any) {
       console.error('Ошибка при сохранении данных о посещаемости:', error);
-      alert('Ошибка при сохранении данных');
+      
+      if (error.response) {
+        console.error('Данные ответа:', error.response.data);
+        console.error('Статус ответа:', error.response.status);
+      }
+      
+      setError('Ошибка при сохранении данных');
     } finally {
       setIsLoading(false);
     }
@@ -326,22 +574,20 @@ const TeacherAttendance: React.FC = () => {
   // Генерация QR-кода
   const handleGenerateQR = () => {
     if (!selectedGroup || !selectedSubject || !selectedDate) {
-      alert('Выберите группу, предмет и дату');
+      setError('Выберите группу, предмет и дату');
       return;
     }
     
-    // Получаем имя группы по ID
     const selectedGroupObj = groups.find(g => g.id === selectedGroup);
     if (!selectedGroupObj) {
       console.error('Группа не найдена по ID:', selectedGroup);
-      alert('Ошибка: группа не найдена');
+      setError('Ошибка: группа не найдена');
       return;
     }
     
-    // Создаем объект с информацией для QR-кода
     const qrData = {
       groupId: selectedGroup,
-      groupName: selectedGroupObj.name, // Добавляем имя группы
+      groupName: selectedGroupObj.name,
       subjectId: selectedSubject,
       date: selectedDate,
       timestamp: new Date().getTime()
@@ -349,16 +595,336 @@ const TeacherAttendance: React.FC = () => {
     
     console.log('Создаем QR-код с данными:', qrData);
     
-    // Преобразуем объект в строку JSON
     const qrString = JSON.stringify(qrData);
-    
     setQrValue(qrString);
     setOpenQRDialog(true);
   };
 
-  // Добавим кнопку ручного обновления
+  // Обновление данных вручную
   const handleRefresh = () => {
-    fetchAttendance();
+    fetchAttendance(true);
+  };
+
+  // Удаление записи о посещаемости
+  const handleDeleteAttendance = async (studentId: string) => {
+    try {
+      console.log('Начало удаления записи посещаемости:', { studentId, selectedSubject, selectedDate });
+      
+      if (!selectedSubject || !selectedDate) {
+        console.error('Необходимы параметры дисциплины и даты для удаления');
+        setError('Выберите дисциплину и дату');
+        return;
+      }
+    
+      const studentInfo = students.find(student => student.id === studentId);
+      
+      console.log('Информация о студенте:', studentInfo);
+      console.log('Текущий статус студента:', studentStatusMap.get(studentId));
+      
+      if (studentInfo) {
+        Swal.fire({
+          title: 'Подтверждение',
+          html: `<div>
+                   <p>Вы уверены, что хотите удалить запись о посещении для студента <b>${studentInfo.fullName}</b>?</p>
+                   <p>ID студента: <code>${studentId}</code></p>
+                   <p>ID дисциплины: <code>${selectedSubject}</code></p>
+                   <p>Дата: <code>${selectedDate}</code></p>
+                 </div>`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#3085d6',
+          cancelButtonColor: '#d33',
+          confirmButtonText: 'Да, удалить',
+          cancelButtonText: 'Отмена',
+        }).then((result: { isConfirmed: boolean }) => {
+          if (result.isConfirmed) {
+            confirmDelete(studentId);
+          }
+        });
+      }
+    } catch (error: any) {
+      console.error('Ошибка при обработке удаления:', error);
+      setError('Не удалось выполнить операцию удаления');
+    }
+  };
+
+  // Новая функция для отладки записей посещаемости
+  const debugAttendanceDetails = async (studentId: string) => {
+    setIsLoading(true);
+    
+    try {
+      console.log(`Проверка записей посещаемости для студента: ${studentId}, дисциплина: ${selectedSubject}, дата: ${selectedDate}`);
+      
+      if (!selectedSubject || !selectedDate) {
+        console.error('Необходимо выбрать дисциплину и дату для проверки записей');
+        return;
+      }
+      
+      const response = await api.get(`/attendance/debug-attendance?student_id=${studentId}&discipline_id=${selectedSubject}&attendance_date=${selectedDate}`);
+      console.log('Полученные записи:', response.data);
+      
+      if (response.data && response.data.student_records > 0) {
+        Swal.fire({
+          title: 'Информация о записях посещаемости',
+          html: (
+            <div style={{ maxHeight: '400px', overflow: 'auto' }}>
+              <p>Всего записей в базе: {response.data.total_records}</p>
+              <p>Записей для выбранного студента: {response.data.student_records}</p>
+              <h4>Детали записей:</h4>
+              {response.data.records.map((record: any, index: number) => (
+                <div key={index} style={{ marginBottom: '16px', padding: '8px', border: '1px solid #eee' }}>
+                  <p>ID записи: {record._id}</p>
+                  <p>ID студента: {record.studentId}</p>
+                  <p>ID дисциплины: {record.discipline_id}</p>
+                  <p>Дата: {record.date}</p>
+                  <p>Статус: {record.status}</p>
+                  <p>Создано: {record.created_at}</p>
+                </div>
+              ))}
+            </div>
+          ),
+          width: 600,
+        });
+      } else {
+        Swal.fire({
+          title: 'Информация о записях посещаемости',
+          text: 'Записи о посещаемости для данного студента не найдены',
+          icon: 'info',
+        });
+      }
+    } catch (error) {
+      console.error('Ошибка при получении записей о посещаемости:', error);
+      Swal.fire({
+        title: 'Ошибка',
+        text: 'Не удалось получить информацию о записях посещаемости',
+        icon: 'error',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Подтверждение удаления
+  const confirmDelete = async (studentId: string) => {
+    try {
+      setIsLoading(true);
+      console.log(`Удаление записи посещаемости: Студент=${studentId}, Дисциплина=${selectedSubject}, Дата=${selectedDate}`);
+      
+      const params = new URLSearchParams({
+        student_id: studentId,
+        discipline_id: selectedSubject,
+        attendance_date: selectedDate,
+      });
+      
+      console.log(`Отправляем запрос на удаление с параметрами: ${params.toString()}`);
+      
+      try {
+        // Сначала проверим, существует ли запись
+        const debugResponse = await api.get(`/attendance/debug-attendance`, {
+          params: {
+            student_id: studentId,
+            discipline_id: selectedSubject,
+            attendance_date: selectedDate
+          }
+        });
+        
+        console.log('Результат проверки перед удалением:', debugResponse.data);
+        
+        if (!debugResponse.data.student_records || debugResponse.data.student_records === 0) {
+          console.warn('Записи посещаемости не найдены в базе данных перед удалением!');
+          Swal.fire({
+            title: 'Внимание',
+            text: 'Записи посещаемости не найдены в базе данных. Возможно, они уже были удалены.',
+            icon: 'warning'
+          });
+          
+          // Обновляем карту статусов
+          const updatedMap = new Map(studentStatusMap);
+          updatedMap.set(studentId, 'Н');
+          setStudentStatusMap(updatedMap);
+          
+          // Обновляем список студентов
+          setStudents(prevStudents => 
+            prevStudents.map(student => 
+              student.id === studentId ? { ...student, status: 'Н' } : student
+            )
+          );
+          
+          // Удаляем запись из списка записей
+          setAttendanceRecords(prevRecords => 
+            prevRecords.filter(record => record.studentId !== studentId)
+          );
+          
+          setSuccess('Студент отмечен как отсутствующий');
+          setIsLoading(false);
+          return;
+        }
+        
+        const response = await api.delete(`/attendance/delete-attendance?${params.toString()}`);
+        console.log('Ответ сервера при удалении:', response.data);
+        
+        if (response.data.success) {
+          // Обновляем карту статусов
+          const updatedMap = new Map(studentStatusMap);
+          updatedMap.set(studentId, 'Н');
+          setStudentStatusMap(updatedMap);
+          
+          // Обновляем список студентов
+          setStudents(prevStudents => 
+            prevStudents.map(student => 
+              student.id === studentId ? { ...student, status: 'Н' } : student
+            )
+          );
+          
+          // Удаляем запись из списка записей
+          setAttendanceRecords(prevRecords => 
+            prevRecords.filter(record => record.studentId !== studentId)
+          );
+          
+          setSuccess('Запись о посещаемости успешно удалена');
+          
+          // Проверим, действительно ли запись удалена
+          setTimeout(async () => {
+            try {
+              const verifyResponse = await api.get(`/attendance/debug-attendance`, {
+                params: {
+                  student_id: studentId,
+                  discipline_id: selectedSubject,
+                  attendance_date: selectedDate
+                }
+              });
+              
+              console.log('Проверка после удаления:', verifyResponse.data);
+              
+              if (verifyResponse.data.student_records && verifyResponse.data.student_records > 0) {
+                console.warn('Запись все еще существует после удаления!');
+                Swal.fire({
+                  title: 'Предупреждение',
+                  text: 'Система сообщила об успешном удалении, но запись все еще существует. Пожалуйста, обратитесь к администратору.',
+                  icon: 'warning'
+                });
+              }
+            } catch (verifyError) {
+              console.error('Ошибка при проверке удаления:', verifyError);
+            }
+          }, 1000);
+        } else {
+          console.error('Ошибка при удалении записи:', response.data.message);
+          setError(`Не удалось удалить запись: ${response.data.message}`);
+          
+          // Отображаем более детальную информацию
+          Swal.fire({
+            title: 'Ошибка при удалении',
+            html: `<div>
+                    <p>Не удалось удалить запись о посещаемости:</p>
+                    <pre>${JSON.stringify(response.data, null, 2)}</pre>
+                  </div>`,
+            icon: 'error'
+          });
+          
+          // Обновляем данные с сервера
+          fetchAttendance(false);
+        }
+      } catch (apiError: any) {
+        console.error('Ошибка API при удалении записи:', apiError);
+        
+        if (apiError.response) {
+          console.error('Данные ответа:', apiError.response.data);
+          console.error('Статус ответа:', apiError.response.status);
+        }
+        
+        const errorMessage = apiError.response?.data?.detail || apiError.message || 'Неизвестная ошибка';
+        setError(`Ошибка при удалении записи: ${errorMessage}`);
+        
+        // Отображаем более детальную информацию
+        Swal.fire({
+          title: 'Ошибка при удалении',
+          html: `<div>
+                  <p>Произошла ошибка при удалении записи о посещаемости:</p>
+                  <pre>${errorMessage}</pre>
+                  <p>Проверьте консоль браузера для получения дополнительной информации.</p>
+                </div>`,
+          icon: 'error'
+        });
+        
+        // Обновляем данные с сервера
+        fetchAttendance(false);
+      }
+    } catch (error: any) {
+      console.error('Общая ошибка при удалении записи о посещаемости:', error);
+      
+      const errorMessage = error.message || 'Неизвестная ошибка';
+      setError(`Ошибка при удалении записи: ${errorMessage}`);
+      
+      // Обновляем данные с сервера
+      fetchAttendance(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const cancelDelete = () => {
+    setIsLoading(false);
+    setStudentToDelete(null);
+  };
+
+  // Визуализация статуса студента, используя значение из карты статусов для стабильности
+  const renderStudentStatus = (studentId: string) => {
+    const status = studentStatusMap.get(studentId) || 'Н';
+    
+    let statusText, statusColor;
+    switch(status) {
+      case 'П':
+        statusText = 'Присутствует';
+        statusColor = 'success.main';
+        break;
+      case 'Н':
+        statusText = 'Отсутствует';
+        statusColor = 'error.main';
+        break;
+      case 'Б':
+        statusText = 'Болеет';
+        statusColor = 'warning.main';
+        break;
+      default:
+        statusText = 'Неизвестно';
+        statusColor = 'text.secondary';
+    }
+    
+    return (
+      <Tooltip title={statusText}>
+        <Box
+          sx={{
+            display: 'inline-block',
+            fontWeight: 'bold',
+            color: statusColor,
+            padding: '4px 8px',
+            borderRadius: '4px',
+            backgroundColor: (theme) => 
+              status === 'П' ? theme.palette.success.light + '20' : 
+              status === 'Н' ? theme.palette.error.light + '20' : 
+              status === 'Б' ? theme.palette.warning.light + '20' : 
+              'transparent'
+          }}
+        >
+          {status}
+        </Box>
+      </Tooltip>
+    );
+  };
+
+  // Функция для определения иконки статуса
+  const getStatusIcon = (status: string) => {
+    switch(status) {
+      case 'П':
+        return <CheckCircleOutline color="success" />;
+      case 'Н':
+        return <RadioButtonUnchecked color="error" />;
+      case 'Б':
+        return <LocalHospital sx={{ color: "#ED6C02", fontSize: '1.2rem' }} />;
+      default:
+        return <QuestionMark fontSize="small" />;
+    }
   };
 
   return (
@@ -366,6 +932,18 @@ const TeacherAttendance: React.FC = () => {
       <Typography variant="h4" component="h1" gutterBottom>
         Учет посещаемости
       </Typography>
+      
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      
+      {success && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess(null)}>
+          {success}
+        </Alert>
+      )}
       
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={3} alignItems="center">
@@ -472,8 +1050,8 @@ const TeacherAttendance: React.FC = () => {
             <>
               <Typography variant="subtitle2" color="textSecondary" sx={{ mb: 1 }}>
                 Найдено студентов: {students.length}. 
-                Присутствуют: {students.filter(s => s.status === 'П').length}.
-                Отсутствуют: {students.filter(s => s.status === 'Н').length}.
+                Присутствуют: {Array.from(studentStatusMap.values()).filter(status => status === 'П').length}.
+                Отсутствуют: {Array.from(studentStatusMap.values()).filter(status => status === 'Н').length}.
               </Typography>
               <TableContainer component={Paper}>
                 <Table>
@@ -487,61 +1065,63 @@ const TeacherAttendance: React.FC = () => {
                   </TableHead>
                   <TableBody>
                     {students.map((student, index) => {
-                      console.log(`Отображение студента: ${student.fullName}, ID: ${student.id}, Статус: ${student.status || 'не указан'}`);
+                      const studentStatus = studentStatusMap.get(student.id) || 'Н';
                       return (
-                        <TableRow key={student.id}>
+                        <TableRow 
+                          key={student.id}
+                          sx={{
+                            backgroundColor: 
+                              studentStatus === 'П' ? 'rgba(0, 200, 0, 0.05)' : 
+                              studentStatus === 'Н' ? 'rgba(255, 0, 0, 0.05)' : 
+                              'transparent'
+                          }}
+                        >
                           <TableCell>{index + 1}</TableCell>
                           <TableCell>{student.fullName}</TableCell>
                           <TableCell align="center">
-                            <Box
-                              sx={{
-                                display: 'inline-block',
-                                fontWeight: 'bold',
-                                color: student.status === 'П' ? 'success.main' : 
-                                      student.status === 'Н' ? 'error.main' : 
-                                      student.status === 'Б' ? 'warning.main' : 'text.secondary'
-                              }}
-                            >
-                              {student.status}
-                            </Box>
+                            {renderStudentStatus(student.id)}
                           </TableCell>
                           <TableCell align="center">
-                            <Button
-                              variant="outlined"
-                              color="success"
-                              size="small"
-                              onClick={() => handleStatusChange(student.id, 'П')}
-                              sx={{ mx: 0.5 }}
-                            >
-                              П
-                            </Button>
-                            <Button
-                              variant="outlined"
-                              color="error"
-                              size="small"
-                              onClick={() => handleStatusChange(student.id, 'Н')}
-                              sx={{ mx: 0.5 }}
-                            >
-                              Н
-                            </Button>
-                            <Button
-                              variant="outlined"
-                              color="warning"
-                              size="small"
-                              onClick={() => handleStatusChange(student.id, 'Б')}
-                              sx={{ mx: 0.5 }}
-                            >
-                              Б
-                            </Button>
-                            <Button
-                              variant="outlined"
-                              color="info"
-                              size="small"
-                              onClick={() => handleStatusChange(student.id, 'У')}
-                              sx={{ mx: 0.5 }}
-                            >
-                              У
-                            </Button>
+                            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+                              <Tooltip title={studentStatus === 'Н' ? 'Отметить присутствие' : 'Отметить отсутствие'}>
+                                <IconButton 
+                                  color={studentStatus === 'Н' ? 'success' : 'error'} 
+                                  onClick={() => handleStatusChange(student.id, studentStatus === 'Н' ? 'П' : 'Н')}
+                                  disabled={isLoading}
+                                >
+                                  {studentStatus === 'Н' ? <CheckCircleOutline /> : <RadioButtonUnchecked />}
+                                </IconButton>
+                              </Tooltip>
+                              
+                              {studentStatus !== 'Н' && (
+                                <>
+                                  <Tooltip title="Просмотреть техническую информацию о записи">
+                                    <IconButton
+                                      color="info"
+                                      onClick={() => debugAttendanceDetails(student.id)}
+                                      disabled={isLoading || loadingStudents[student.id]}
+                                      size="small"
+                                    >
+                                      {loadingStudents[student.id] ? (
+                                        <CircularProgress size={24} />
+                                      ) : (
+                                        <Visibility />
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
+                                  
+                                  <Tooltip title="Удалить запись о присутствии">
+                                    <IconButton
+                                      color="error"
+                                      onClick={() => handleDeleteAttendance(student.id)}
+                                      disabled={isLoading}
+                                    >
+                                      <DeleteOutline />
+                                    </IconButton>
+                                  </Tooltip>
+                                </>
+                              )}
+                            </Box>
                           </TableCell>
                         </TableRow>
                       );
@@ -568,7 +1148,7 @@ const TeacherAttendance: React.FC = () => {
                 onClick={handleSaveAttendance}
                 disabled={isLoading}
               >
-                {isLoading ? <CircularProgress size={24} /> : 'Сохранить'}
+                {isLoading ? <CircularProgress size={24} /> : 'Сохранить все'}
               </Button>
             </Box>
           )}

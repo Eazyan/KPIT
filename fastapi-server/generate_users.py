@@ -8,8 +8,11 @@ import random
 from app.core.database import db, users_collection, groups_collection, disciplines_collection
 from app.models.user import UserRole
 from app.core.security import get_password_hash
-from datetime import datetime
+from datetime import datetime, timedelta
 from bson import ObjectId
+import os
+import asyncio
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -359,6 +362,129 @@ def create_users(count=100, clear_db=False):
     except Exception as e:
         logger.error(f"Ошибка при заполнении базы данных: {str(e)}")
 
+async def generate_test_grades():
+    """
+    Генерирует тестовые оценки для тестового студента
+    """
+    logger.info("Генерация тестовых оценок для тестового студента")
+    
+    # Находим тестового студента
+    test_student = users_collection.find_one({"email": "student@dvfu.ru"})
+    if not test_student:
+        logger.error("Тестовый студент не найден")
+        return
+    
+    student_id = str(test_student["_id"])
+    logger.info(f"Найден тестовый студент с ID: {student_id}")
+    
+    # Находим дисциплины для группы студента
+    group_name = test_student.get("group")
+    if not group_name:
+        logger.error("У тестового студента не указана группа")
+        return
+    
+    group = db["groups"].find_one({"name": group_name})
+    if not group:
+        logger.error(f"Группа {group_name} не найдена")
+        return
+    
+    # Получаем все дисциплины для группы студента
+    disciplines = list(disciplines_collection.find({"groups": {"$in": [str(group["_id"])]}}))
+    
+    if not disciplines:
+        logger.error(f"Дисциплины для группы {group_name} не найдены")
+        return
+    
+    logger.info(f"Найдено {len(disciplines)} дисциплин для группы {group_name}")
+    
+    # Создаем коллекцию для оценок, если её ещё нет
+    if "grades" not in db.list_collection_names():
+        db.create_collection("grades")
+    
+    grades_collection = db["grades"]
+    
+    # Удаляем старые оценки тестового студента
+    grades_collection.delete_many({"student_id": student_id})
+    
+    # Типы оценок
+    grade_types = ["exam", "test", "homework", "project", "activity"]
+    
+    # Для каждой дисциплины генерируем несколько оценок
+    total_grades = 0
+    
+    for discipline in disciplines:
+        discipline_id = str(discipline["_id"])
+        
+        # Генерируем от 5 до 15 оценок для дисциплины
+        num_grades = random.randint(5, 15)
+        
+        # Находим преподавателя для этой дисциплины
+        teacher_id = discipline.get("teacher")
+        if not teacher_id:
+            # Если не указан преподаватель, берем первого из списка преподавателей
+            teacher = users_collection.find_one({"role": "teacher"})
+            teacher_id = str(teacher["_id"]) if teacher else None
+        
+        if not teacher_id:
+            logger.warning(f"Не найден преподаватель для дисциплины {discipline.get('name')}")
+            continue
+            
+        # Даты для оценок (за последние 3 месяца)
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        for i in range(num_grades):
+            # Генерируем случайную дату в диапазоне последних 3 месяцев
+            grade_date = start_date + timedelta(
+                seconds=random.randint(0, int((end_date - start_date).total_seconds()))
+            )
+            
+            # Для первой дисциплины добавляем оценки всех типов
+            if disciplines.index(discipline) == 0:
+                # Для разнообразия анализа добавляем оценки от 1 до 5
+                values = [1, 2, 3, 4, 5]
+                value = values[i % len(values)]
+                grade_type = grade_types[i % len(grade_types)]
+            else:
+                # Для остальных дисциплин генерируем случайные оценки
+                # С небольшим перекосом в сторону хороших оценок
+                value = random.choices([1, 2, 3, 4, 5], weights=[1, 1, 3, 4, 3])[0]
+                grade_type = random.choice(grade_types)
+            
+            # Создаем оценку
+            grade = {
+                "student_id": student_id,
+                "discipline_id": discipline_id,
+                "value": value,
+                "type": grade_type,
+                "description": f"Оценка за {grade_type}",
+                "date": grade_date,
+                "weight": random.choice([0.5, 1.0, 1.5, 2.0]),  # Разные веса оценок
+                "created_at": datetime.utcnow(),
+                "created_by": teacher_id
+            }
+            
+            result = grades_collection.insert_one(grade)
+            if result.inserted_id:
+                total_grades += 1
+    
+    logger.info(f"Сгенерировано {total_grades} оценок для тестового студента")
+
+async def main():
+    logger.info("Начало генерации оценок")
+    
+    # Подключение к MongoDB
+    client = AsyncIOMotorClient(os.getenv("MONGODB_URL", "mongodb://localhost:27017/ksu"))
+    global db, users_collection, disciplines_collection
+    db = client["ksu"]
+    users_collection = db["users"]
+    disciplines_collection = db["disciplines"]
+    
+    # Запускаем только генерацию оценок
+    await generate_test_grades()
+    
+    logger.info("Генерация оценок завершена")
+
 if __name__ == "__main__":
     import argparse
     
@@ -368,4 +494,5 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    create_users(count=args.count, clear_db=args.clear) 
+    create_users(count=args.count, clear_db=args.clear)
+    asyncio.run(main()) 

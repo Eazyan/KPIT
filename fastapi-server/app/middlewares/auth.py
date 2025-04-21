@@ -3,9 +3,11 @@ from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 import logging
+from bson import ObjectId
 
 from ..core.security import decode_token
-from ..models.user import UserRole, TokenData
+from ..models.user import UserRole, TokenData, UserInDB
+from ..core.database import users_collection
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -24,9 +26,11 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Opt
         TokenData: Данные пользователя из токена или None, если токен недействителен
     """
     if not token:
+        logger.warning("Токен не предоставлен")
         return None
     
     try:
+        logger.debug(f"Начало декодирования токена: {token[:10]}...")
         payload = decode_token(token)
         
         if not payload:
@@ -35,6 +39,8 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Opt
             
         user_id = payload.get("sub")
         user_role = payload.get("role")
+        
+        logger.debug(f"Данные из токена: user_id={user_id}, role={user_role}")
         
         if not user_id or not user_role:
             logger.warning(f"Отсутствуют обязательные поля в токене: id={user_id}, role={user_role}")
@@ -48,6 +54,7 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Opt
             return None
             
         token_data = TokenData(id=user_id, role=role)
+        logger.debug(f"Создан объект TokenData: id={token_data.id}, role={token_data.role}")
         return token_data
         
     except JWTError as e:
@@ -59,7 +66,7 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Opt
 
 async def get_current_active_user(
     current_user: Optional[TokenData] = Depends(get_current_user)
-) -> TokenData:
+) -> UserInDB:
     """
     Проверка, что токен содержит валидного пользователя
     
@@ -67,19 +74,40 @@ async def get_current_active_user(
         current_user: Данные пользователя из токена
         
     Returns:
-        TokenData: Валидные данные пользователя
+        UserInDB: Полные данные пользователя из базы данных
         
     Raises:
         HTTPException: Если токен недействителен или отсутствует
     """
+    logger.debug(f"get_current_active_user вызван с current_user={current_user}")
     if not current_user:
+        logger.warning("Пользователь не аутентифицирован (current_user is None)")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Необходима авторизация. Токен недействителен или отсутствует.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    return current_user
+    # Получаем полные данные пользователя из базы данных
+    try:
+        user = users_collection.find_one({"_id": ObjectId(current_user.id)})
+        if not user:
+            logger.warning(f"Пользователь с ID {current_user.id} не найден в базе данных")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Пользователь не найден в базе данных",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            
+        logger.debug(f"Возвращаем пользователя из БД: id={user['_id']}, name={user.get('name')}, role={user.get('role')}")
+        return user
+    
+    except Exception as e:
+        logger.error(f"Ошибка при получении пользователя из базы данных: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ошибка при получении данных пользователя",
+        )
 
 def check_roles(allowed_roles: List[UserRole]):
     """

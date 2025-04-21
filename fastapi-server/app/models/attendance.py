@@ -6,10 +6,10 @@ from datetime import date, datetime
 
 class AttendanceStatus(str, Enum):
     """Статусы присутствия на занятии"""
-    PRESENT = "present"  # Присутствовал
-    ABSENT = "absent"    # Отсутствовал
-    SICK = "sick"        # Болел
-    EXCUSED = "excused"  # Уважительная причина
+    PRESENT = "П"  # Присутствовал
+    ABSENT = "Н"   # Отсутствовал
+    SICK = "Б"     # Болел
+    EXCUSED = "У"  # Уважительная причина
 
 
 class AttendanceBase(BaseModel):
