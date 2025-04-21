@@ -9,7 +9,8 @@ import {
   Divider, 
   Box, 
   useTheme,
-  Typography
+  Typography,
+  useMediaQuery
 } from '@mui/material';
 import {
   Home,
@@ -20,7 +21,12 @@ import {
   EventNote,
   Assessment,
   Settings,
-  Person
+  Person,
+  CalendarMonth,
+  QrCode2,
+  EventAvailable,
+  HowToReg,
+  Leaderboard
 } from '@mui/icons-material';
 import { Link, useLocation } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
@@ -48,56 +54,95 @@ const Sidebar: React.FC<SidebarProps> = ({
   const { user } = useContext(AuthContext);
   const location = useLocation();
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   
-  // Общие элементы меню
-  const commonMenuItems: MenuItem[] = [
-    { text: 'Главная', icon: <Home />, path: '/' },
-    { text: 'Профиль', icon: <Person />, path: '/profile' },
-  ];
-  
-  // Элементы меню для студента
-  const studentMenuItems: MenuItem[] = [
-    { text: 'Моя успеваемость', icon: <Assessment />, path: '/grades' },
-    { text: 'Моя посещаемость', icon: <EventNote />, path: '/attendance' },
-    { text: 'Расписание', icon: <EventNote />, path: '/schedule' },
-  ];
-  
-  // Элементы меню для преподавателя
-  const teacherMenuItems: MenuItem[] = [
-    { text: 'Мои дисциплины', icon: <School />, path: '/disciplines' },
-    { text: 'Контроль посещаемости', icon: <EventNote />, path: '/attendance-control' },
-    { text: 'Контроль успеваемости', icon: <AssignmentTurnedIn />, path: '/grades-control' },
-    { text: 'Отчеты', icon: <Assessment />, path: '/reports' },
-  ];
-  
-  // Элементы меню для администратора
-  const adminMenuItems: MenuItem[] = [
-    { text: 'Панель администратора', icon: <Dashboard />, path: '/admin/dashboard' },
-    { text: 'Управление пользователями', icon: <Group />, path: '/admin/users' },
-    { text: 'Управление группами', icon: <Group />, path: '/admin/groups' },
-    { text: 'Управление дисциплинами', icon: <School />, path: '/admin/disciplines' },
-    { text: 'Настройки системы', icon: <Settings />, path: '/admin/settings' },
-  ];
-  
-  // Определение активных пунктов меню на основе роли пользователя
-  let roleSpecificItems: MenuItem[] = [];
-  let roleTitle = '';
-  
-  if (user) {
+  // Определяем доступные пункты меню в зависимости от роли пользователя
+  const getMenuItems = (): MenuItem[] => {
+    const commonItems: MenuItem[] = [
+      {
+        text: 'Главная',
+        icon: <Dashboard />,
+        path: '/',
+      },
+      {
+        text: 'Расписание',
+        icon: <CalendarMonth />,
+        path: '/schedule',
+      },
+    ];
+    
+    const studentItems: MenuItem[] = [
+      {
+        text: 'Моя посещаемость',
+        icon: <HowToReg />,
+        path: '/attendance/my',
+      },
+      {
+        text: 'Сканировать QR-код',
+        icon: <QrCode2 />,
+        path: '/attendance/scan',
+      },
+      {
+        text: 'Мои оценки',
+        icon: <Assessment />,
+        path: '/grades',
+      },
+    ];
+    
+    const teacherItems: MenuItem[] = [
+      {
+        text: 'Учет посещаемости',
+        icon: <EventAvailable />,
+        path: '/attendance/teacher',
+      },
+      {
+        text: 'Журнал оценок',
+        icon: <School />,
+        path: '/teacher/grades',
+      },
+    ];
+    
+    const adminItems: MenuItem[] = [
+      {
+        text: 'Посещаемость (администрирование)',
+        icon: <Leaderboard />,
+        path: '/attendance/admin',
+      },
+      {
+        text: 'Управление группами',
+        icon: <Group />,
+        path: '/admin/groups',
+      },
+      {
+        text: 'Управление пользователями',
+        icon: <Person />,
+        path: '/admin/users',
+      },
+      {
+        text: 'Настройки системы',
+        icon: <Settings />,
+        path: '/admin/settings',
+      },
+    ];
+    
+    if (!user) return commonItems;
+    
     if (user.role === UserRole.STUDENT) {
-      roleSpecificItems = studentMenuItems;
-      roleTitle = 'Студент';
-    } else if (user.role === UserRole.TEACHER) {
-      roleSpecificItems = teacherMenuItems;
-      roleTitle = 'Преподаватель';
-    } else if (user.role === UserRole.ADMIN) {
-      roleSpecificItems = adminMenuItems;
-      roleTitle = 'Администратор';
-    } else if (user.role === UserRole.HEAD_OF_DEPARTMENT) {
-      roleSpecificItems = [...teacherMenuItems, ...adminMenuItems.slice(0, -1)];
-      roleTitle = 'Заведующий кафедрой';
+      return [...commonItems, ...studentItems];
     }
-  }
+    
+    if (user.role === UserRole.TEACHER || user.role === UserRole.HEAD_OF_DEPARTMENT) {
+      return [...commonItems, ...teacherItems];
+    }
+    
+    if (user.role === UserRole.ADMIN) {
+      return [...commonItems, ...adminItems];
+    }
+    
+    return commonItems;
+  };
+  
+  const menuItems = getMenuItems();
   
   // Контент боковой панели
   const drawerContent = (
@@ -121,7 +166,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       {user && (
         <Box sx={{ p: 2 }}>
           <Typography variant="subtitle2" color="text.secondary">
-            {roleTitle}
+            {user.role === UserRole.STUDENT ? 'Студент' : user.role === UserRole.TEACHER ? 'Преподаватель' : user.role === UserRole.ADMIN ? 'Администратор' : 'Заведующий кафедрой'}
           </Typography>
           <Typography variant="body1" fontWeight={500}>
             {user.name}
@@ -142,78 +187,47 @@ const Sidebar: React.FC<SidebarProps> = ({
       <Divider />
       
       <List component="nav">
-        {commonMenuItems.map((item) => (
+        {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <ListItemButton
               component={Link}
               to={item.path}
               selected={location.pathname === item.path}
-              onClick={onClose}
+              onClick={isMobile ? onClose : undefined}
               sx={{
+                py: 1,
+                minHeight: 48,
                 borderRadius: '0 24px 24px 0',
-                mr: 1,
+                mx: 1,
                 '&.Mui-selected': {
-                  bgcolor: 'rgba(10, 132, 255, 0.08)',
-                  '&:hover': {
-                    bgcolor: 'rgba(10, 132, 255, 0.12)',
-                  },
+                  backgroundColor: 'rgba(25, 118, 210, 0.08)',
+                },
+                '&.Mui-selected:hover': {
+                  backgroundColor: 'rgba(25, 118, 210, 0.12)',
                 },
               }}
             >
-              <ListItemIcon 
-                sx={{ 
-                  color: location.pathname === item.path 
-                    ? theme.palette.primary.main 
-                    : theme.palette.text.secondary 
+              <ListItemIcon
+                sx={{
+                  minWidth: 0,
+                  mr: 2,
+                  justifyContent: 'center',
+                  color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
                 }}
               >
                 {item.icon}
               </ListItemIcon>
-              <ListItemText primary={item.text} />
+              <ListItemText
+                primary={item.text}
+                primaryTypographyProps={{
+                  fontWeight: location.pathname === item.path ? 600 : 400,
+                  color: location.pathname === item.path ? 'primary.main' : 'text.primary',
+                }}
+              />
             </ListItemButton>
           </ListItem>
         ))}
       </List>
-      
-      {user && roleSpecificItems.length > 0 && (
-        <>
-          <Divider sx={{ mt: 1, mb: 1 }} />
-          
-          <List component="nav">
-            {roleSpecificItems.map((item) => (
-              <ListItem key={item.text} disablePadding>
-                <ListItemButton
-                  component={Link}
-                  to={item.path}
-                  selected={location.pathname === item.path}
-                  onClick={onClose}
-                  sx={{
-                    borderRadius: '0 24px 24px 0',
-                    mr: 1,
-                    '&.Mui-selected': {
-                      bgcolor: 'rgba(10, 132, 255, 0.08)',
-                      '&:hover': {
-                        bgcolor: 'rgba(10, 132, 255, 0.12)',
-                      },
-                    },
-                  }}
-                >
-                  <ListItemIcon 
-                    sx={{ 
-                      color: location.pathname === item.path 
-                        ? theme.palette.primary.main 
-                        : theme.palette.text.secondary 
-                    }}
-                  >
-                    {item.icon}
-                  </ListItemIcon>
-                  <ListItemText primary={item.text} />
-                </ListItemButton>
-              </ListItem>
-            ))}
-          </List>
-        </>
-      )}
     </Box>
   );
   

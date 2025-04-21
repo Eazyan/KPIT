@@ -1,33 +1,32 @@
 import React, { useContext } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   Box, 
+  Container, 
   Typography, 
-  Card, 
-  CardContent, 
-  Button, 
-  useTheme,
-  CardActionArea,
+  Paper,
+  Grid,
+  Card,
+  CardContent,
+  Button,
+  Avatar,
   Chip,
-  Stack,
-  Paper
+  Stack
 } from '@mui/material';
-import Grid from '@mui/material/Grid';
 import { 
-  Assessment, 
-  EventNote, 
-  Group, 
-  School, 
-  TrendingUp, 
-  Notifications
+  Dashboard,
+  School,
+  CalendarMonth,
+  Assignment,
+  Group,
+  EventNote
 } from '@mui/icons-material';
-import { Link } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { AuthContext } from '../context/AuthContext';
 import { UserRole } from '../types';
 
 const HomePage: React.FC = () => {
   const { user } = useContext(AuthContext);
-  const theme = useTheme();
   
   // Функция для отображения приветствия в зависимости от времени суток
   const getGreeting = (): string => {
@@ -151,7 +150,7 @@ const HomePage: React.FC = () => {
                   >
                     <CardContent sx={{ p: 3 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                        <Assessment color="primary" sx={{ mr: 1 }} />
+                        <Dashboard color="primary" sx={{ mr: 1 }} />
                         <Typography variant="h6" fontWeight={600}>
                           Успеваемость
                         </Typography>
@@ -188,7 +187,7 @@ const HomePage: React.FC = () => {
                   >
                     <CardContent sx={{ p: 3 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                        <EventNote color="primary" sx={{ mr: 1 }} />
+                        <CalendarMonth color="primary" sx={{ mr: 1 }} />
                         <Typography variant="h6" fontWeight={600}>
                           Посещаемость
                         </Typography>
@@ -202,15 +201,27 @@ const HomePage: React.FC = () => {
                         Процент посещаемости за текущий семестр
                       </Typography>
                       
-                      <Button 
-                        component={Link} 
-                        to="/attendance"
-                        variant="outlined" 
-                        fullWidth
-                        sx={{ borderRadius: 2 }}
-                      >
-                        Подробнее
-                      </Button>
+                      {user && user.role === UserRole.STUDENT ? (
+                        <Button 
+                          component={Link} 
+                          to="/attendance/scan"
+                          variant="outlined" 
+                          fullWidth
+                          sx={{ borderRadius: 2 }}
+                        >
+                          Сканировать QR-код
+                        </Button>
+                      ) : (
+                        <Button 
+                          component={Link} 
+                          to="/attendance/teacher"
+                          variant="outlined" 
+                          fullWidth
+                          sx={{ borderRadius: 2 }}
+                        >
+                          Учет посещаемости
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 </Stack>
@@ -476,7 +487,7 @@ const HomePage: React.FC = () => {
                   >
                     <CardContent sx={{ p: 3 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                        <TrendingUp color="primary" sx={{ mr: 1 }} />
+                        <Dashboard color="primary" sx={{ mr: 1 }} />
                         <Typography variant="h6" fontWeight={600}>
                           Активность системы
                         </Typography>
@@ -513,7 +524,7 @@ const HomePage: React.FC = () => {
                   >
                     <CardContent sx={{ p: 3 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                        <Notifications color="primary" sx={{ mr: 1 }} />
+                        <Assignment color="primary" sx={{ mr: 1 }} />
                         <Typography variant="h6" fontWeight={600}>
                           Системные уведомления
                         </Typography>
@@ -557,45 +568,33 @@ const HomePage: React.FC = () => {
                 flexDirection: 'column',
               }}
             >
-              <CardActionArea 
-                component={Link} 
-                to="/login"
-                sx={{ 
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  justifyContent: 'flex-start',
-                }}
-              >
-                <CardContent sx={{ p: 4, width: '100%' }}>
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      mb: 2,
-                      color: theme.palette.primary.main,
-                    }}
-                  >
-                    <School sx={{ fontSize: 50, mr: 2 }} />
-                    <Typography variant="h5" fontWeight={600}>
-                      Для студентов
-                    </Typography>
-                  </Box>
-                  
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    Следите за своей успеваемостью и посещаемостью, просматривайте расписание занятий и актуальные оценки по всем предметам.
+              <CardContent sx={{ p: 4, width: '100%' }}>
+                <Box 
+                  sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    mb: 2,
+                    color: 'primary.main',
+                  }}
+                >
+                  <School sx={{ fontSize: 50, mr: 2 }} />
+                  <Typography variant="h5" fontWeight={600}>
+                    Для студентов
                   </Typography>
-                  
-                  <Button 
-                    variant="contained" 
-                    color="primary"
-                    sx={{ mt: 2, borderRadius: 2, px: 4 }}
-                  >
-                    Войти как студент
-                  </Button>
-                </CardContent>
-              </CardActionArea>
+                </Box>
+                
+                <Typography variant="body1" sx={{ mb: 2 }}>
+                  Следите за своей успеваемостью и посещаемостью, просматривайте расписание занятий и актуальные оценки по всем предметам.
+                </Typography>
+                
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  sx={{ mt: 2, borderRadius: 2, px: 4 }}
+                >
+                  Войти как студент
+                </Button>
+              </CardContent>
             </Card>
           </Grid>
           
@@ -612,45 +611,33 @@ const HomePage: React.FC = () => {
                 flexDirection: 'column',
               }}
             >
-              <CardActionArea 
-                component={Link} 
-                to="/login"
-                sx={{ 
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  justifyContent: 'flex-start',
-                }}
-              >
-                <CardContent sx={{ p: 4, width: '100%' }}>
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      mb: 2,
-                      color: theme.palette.secondary.main,
-                    }}
-                  >
-                    <Assessment sx={{ fontSize: 50, mr: 2 }} />
-                    <Typography variant="h5" fontWeight={600}>
-                      Для преподавателей
-                    </Typography>
-                  </Box>
-                  
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    Управляйте учебным процессом, отмечайте посещаемость, выставляйте оценки и анализируйте успеваемость ваших студентов.
+              <CardContent sx={{ p: 4, width: '100%' }}>
+                <Box 
+                  sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    mb: 2,
+                    color: 'secondary.main',
+                  }}
+                >
+                  <Assignment sx={{ fontSize: 50, mr: 2 }} />
+                  <Typography variant="h5" fontWeight={600}>
+                    Для преподавателей
                   </Typography>
-                  
-                  <Button 
-                    variant="contained" 
-                    color="secondary"
-                    sx={{ mt: 2, borderRadius: 2, px: 4 }}
-                  >
-                    Войти как преподаватель
-                  </Button>
-                </CardContent>
-              </CardActionArea>
+                </Box>
+                
+                <Typography variant="body1" sx={{ mb: 2 }}>
+                  Управляйте учебным процессом, отмечайте посещаемость, выставляйте оценки и анализируйте успеваемость ваших студентов.
+                </Typography>
+                
+                <Button 
+                  variant="contained" 
+                  color="secondary"
+                  sx={{ mt: 2, borderRadius: 2, px: 4 }}
+                >
+                  Войти как преподаватель
+                </Button>
+              </CardContent>
             </Card>
           </Grid>
         </Grid>

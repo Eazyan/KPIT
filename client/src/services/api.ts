@@ -1,37 +1,39 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5005/api';
-
-// Создаем экземпляр axios с базовым URL
+// Создаем экземпляр axios с базовыми настройками
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5005/api',
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Перехватчик запросов для добавления токена авторизации
+// Интерцептор для добавления токена авторизации
 api.interceptors.request.use(
   (config) => {
+    console.log(`🚀 Отправка запроса: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`, config);
     const token = localStorage.getItem('userToken');
     if (token) {
-      config.headers['Authorization'] = `Bearer ${token}`;
+      config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Перехватчик ответов для обработки ошибок 401 (не авторизован)
+// Интерцептор для обработки ошибок
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log(`✅ Получен ответ: ${response.config.method?.toUpperCase()} ${response.config.url}`, response.data);
+    return response;
+  },
   (error) => {
+    console.log(`❌ Ошибка запроса:`, error.config, error.response);
+    // Если ошибка 401 (неавторизован), выходим из аккаунта
     if (error.response && error.response.status === 401) {
-      // При ошибке авторизации очищаем localStorage и перенаправляем на страницу входа
       localStorage.removeItem('user');
       localStorage.removeItem('userToken');
+      // Перенаправляем на страницу входа
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -46,7 +48,7 @@ export const authAPI = {
     formData.append('username', email); // FastAPI ожидает 'username' вместо 'email'
     formData.append('password', password);
     
-    const response = await axios.post(`${API_URL}/auth/login`, formData, {
+    const response = await axios.post(`${process.env.REACT_APP_API_URL}/auth/login`, formData, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
@@ -121,16 +123,28 @@ export const attendanceAPI = {
     const response = await api.get(`/attendance/student/${studentId}`);
     return response.data;
   },
-  create: async (attendanceData: any) => {
-    const response = await api.post('/attendance', attendanceData);
+  getGroups: async () => {
+    const response = await api.get('/attendance/groups');
     return response.data;
   },
-  update: async (id: string, attendanceData: any) => {
-    const response = await api.put(`/attendance/${id}`, attendanceData);
+  getDisciplines: async (groupId: string) => {
+    const response = await api.get(`/attendance/disciplines?group_id=${groupId}`);
     return response.data;
   },
-  delete: async (id: string) => {
-    const response = await api.delete(`/attendance/${id}`);
+  getRecords: async (params: { group_name: string, discipline_id: string, attendance_date: string }) => {
+    const response = await api.get('/attendance/records', { params });
+    return response.data;
+  },
+  update: async (attendanceData: any) => {
+    const response = await api.post('/attendance/update', attendanceData);
+    return response.data;
+  },
+  generateQR: async (data: { group_name: string, discipline_id: string, attendance_date: string }) => {
+    const response = await api.post('/attendance/generate-qr', data);
+    return response.data;
+  },
+  markByQR: async (studentId: string, qrData: any) => {
+    const response = await api.post('/attendance/student/mark-qr', qrData);
     return response.data;
   },
 };
@@ -159,4 +173,4 @@ export const gradesAPI = {
   },
 };
 
-export default api; 
+export { api }; 

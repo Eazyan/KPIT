@@ -17,4 +17,5 @@ db: Database = client[DATABASE_NAME]
 # Коллекции базы данных
 users_collection = db.users
 groups_collection = db.groups
-disciplines_collection = db.disciplines 
+disciplines_collection = db.disciplines
+attendance_collection = db.attendance 

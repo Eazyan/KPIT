@@ -1,8 +1,18 @@
-import { createContext, useState, useEffect, ReactNode } from 'react';
-import { User } from '../types';
-import { authAPI } from '../services/api';
+import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import { api } from '../services/api';
+import { UserRole } from '../types';
 
-interface AuthContextProps {
+interface User {
+  _id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  group?: string;
+  department?: string;
+  token?: string;
+}
+
+interface AuthContextType {
   user: User | null;
   loading: boolean;
   error: string | null;
@@ -11,7 +21,7 @@ interface AuthContextProps {
   logout: () => void;
 }
 
-export const AuthContext = createContext<AuthContextProps>({
+export const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: false,
   error: null,
@@ -24,9 +34,9 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-export const AuthProvider = ({ children }: AuthProviderProps) => {
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   // Проверка наличия сохраненного пользователя при загрузке
@@ -41,7 +51,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           
           // Проверяем, валиден ли токен
           try {
-            await authAPI.getProfile();
+            await api.get('/auth/profile');
           } catch (error) {
             // Если токен невалидный, выходим из аккаунта
             logout();
@@ -63,14 +73,22 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setError(null);
     
     try {
-      const userData = await authAPI.login(email, password);
+      const formData = new URLSearchParams();
+      formData.append('username', email);
+      formData.append('password', password);
+      
+      const response = await api.post('/auth/login', formData, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      });
       
       // Сохраняем данные пользователя
-      setUser(userData);
-      localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('userToken', userData.token);
+      setUser(response.data);
+      localStorage.setItem('user', JSON.stringify(response.data));
+      localStorage.setItem('userToken', response.data.token);
     } catch (error: any) {
-      setError(error.response?.data?.message || 'Ошибка при входе в систему');
+      setError(error.response?.data?.detail || 'Ошибка при входе в систему');
       throw error;
     } finally {
       setLoading(false);
@@ -83,14 +101,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setError(null);
     
     try {
-      const newUser = await authAPI.register(userData);
+      const response = await api.post('/auth/register', userData);
       
       // Сохраняем данные пользователя
-      setUser(newUser);
-      localStorage.setItem('user', JSON.stringify(newUser));
-      localStorage.setItem('userToken', newUser.token);
+      setUser(response.data);
+      localStorage.setItem('user', JSON.stringify(response.data));
+      localStorage.setItem('userToken', response.data.token);
     } catch (error: any) {
-      setError(error.response?.data?.message || 'Ошибка при регистрации');
+      setError(error.response?.data?.detail || 'Ошибка при регистрации');
       throw error;
     } finally {
       setLoading(false);
@@ -118,4 +136,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       {children}
     </AuthContext.Provider>
   );
-}; 
+};
+
+export const useAuth = () => React.useContext(AuthContext); 

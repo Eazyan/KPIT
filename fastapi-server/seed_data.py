@@ -27,7 +27,7 @@ def main():
         logger.info("Создание тестовых групп...")
         groups = [
             {
-                "name": "ИВТ-101",
+                "name": "Б9123-01.03.02",
                 "department": "Информатика и вычислительная техника",
                 "specialization": "Программная инженерия",
                 "course": 1,
@@ -35,7 +35,7 @@ def main():
                 "updated_at": datetime.utcnow()
             },
             {
-                "name": "ИВТ-201",
+                "name": "Б9122-01.03.02",
                 "department": "Информатика и вычислительная техника",
                 "specialization": "Программная инженерия",
                 "course": 2,
@@ -43,7 +43,7 @@ def main():
                 "updated_at": datetime.utcnow()
             },
             {
-                "name": "ИКБ-301",
+                "name": "Б9121-10.03.01",
                 "department": "Информационная безопасность",
                 "specialization": "Кибербезопасность",
                 "course": 3,
@@ -53,9 +53,11 @@ def main():
         ]
         
         group_ids = []
+        group_names = []
         for group in groups:
             result = groups_collection.insert_one(group)
             group_ids.append(result.inserted_id)
+            group_names.append(group['name'])
             logger.info(f"Создана группа: {group['name']}")
         
         # Создание пользователей разных ролей
@@ -92,7 +94,7 @@ def main():
                 "email": "student@test.com",
                 "password_hash": get_password_hash("password123"),
                 "role": UserRole.STUDENT,
-                "group": str(group_ids[0]),
+                "group": group_names[0],  # Используем название группы вместо ID
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
@@ -111,7 +113,7 @@ def main():
                 "name": "Программирование",
                 "teacher": user_ids[2],  # Преподаватель
                 "semester": 1,
-                "groups": [group_ids[0]],  # ИВТ-101
+                "groups": [group_ids[0]],  # Б9123-01.03.02
                 "department": "Информатика и вычислительная техника",
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
@@ -120,7 +122,7 @@ def main():
                 "name": "Базы данных",
                 "teacher": user_ids[2],  # Преподаватель
                 "semester": 3,
-                "groups": [group_ids[1]],  # ИВТ-201
+                "groups": [group_ids[1]],  # Б9122-01.03.02
                 "department": "Информатика и вычислительная техника",
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
@@ -129,7 +131,7 @@ def main():
                 "name": "Защита информации",
                 "teacher": user_ids[2],  # Преподаватель
                 "semester": 5,
-                "groups": [group_ids[2]],  # ИКБ-301
+                "groups": [group_ids[2]],  # Б9121-10.03.01
                 "department": "Информационная безопасность",
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()

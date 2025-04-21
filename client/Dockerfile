@@ -1,22 +1,12 @@
-FROM node:16-alpine as build
+FROM node:16-alpine
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
-COPY . ./
-RUN npm run build
+COPY . .
 
-# Стадия продакшена с nginx
-FROM nginx:alpine
+EXPOSE 3000
 
-# Копирование собранных файлов
-COPY --from=build /app/build /usr/share/nginx/html
-
-# Копирование конфигурации nginx
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"] 
+CMD ["npm", "start"] 
