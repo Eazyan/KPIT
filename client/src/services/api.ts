@@ -1,20 +1,104 @@
 import axios from 'axios';
+import { Buffer } from 'buffer';
+import { UserRole } from '../types';
+
+// Настройки API
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5005/api';
+
+// Интерфейс для содержимого JWT токена
+interface JwtPayload {
+  sub: string;
+  role: string;
+  exp: number;
+  iat: number;
+}
+
+// Флаг для отслеживания перенаправления
+let isRedirecting = false;
 
 // Создаем экземпляр axios с базовыми настройками
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5005/api',
+  baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
+// Функция для безопасного декодирования JWT токена
+const decodeJwt = (token: string): JwtPayload | null => {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      console.error('Неверный формат JWT токена');
+      return null;
+    }
+    
+    // Декодируем payload часть токена (часть между первой и второй точкой)
+    const payload = Buffer.from(parts[1], 'base64').toString();
+    return JSON.parse(payload);
+  } catch (error) {
+    console.error('Ошибка при декодировании токена:', error);
+    return null;
+  }
+};
+
+// Проверка срока действия токена
+const isTokenExpired = (token: string): boolean => {
+  try {
+    // Декодируем токен
+    const decoded = decodeJwt(token);
+    const currentTime = Math.floor(Date.now() / 1000);
+    
+    // Проверяем, что exp существует и больше текущего времени
+    if (!decoded || !decoded.exp) {
+      return true;
+    }
+    
+    return decoded.exp < currentTime;
+  } catch (error) {
+    console.error('Ошибка при проверке токена:', error);
+    return true; // Если возникла ошибка при декодировании, считаем токен истекшим
+  }
+};
+
 // Интерцептор для добавления токена авторизации
 api.interceptors.request.use(
   (config) => {
-    console.log(`🚀 Отправка запроса: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`, config);
+    const requestDesc = `${config.method ? config.method.toUpperCase() : 'GET'} ${config.url}`;
+    console.log(`🚀 Отправка запроса: ${requestDesc}`);
+    
     const token = localStorage.getItem('userToken');
+    
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      // Проверяем срок действия токена перед его использованием
+      if (isTokenExpired(token)) {
+        console.warn('Токен истек. Необходима повторная авторизация.');
+        
+        // Проверяем, не является ли запрос авторизационным
+        const isAuthRequest = config.url && (
+          config.url.includes('/auth/login') || 
+          config.url.includes('/auth/register')
+        );
+        
+        if (!isAuthRequest && !isRedirecting) {
+          // Помечаем, что перенаправление уже выполняется
+          isRedirecting = true;
+          
+          // Очищаем данные пользователя
+          localStorage.removeItem('user');
+          localStorage.removeItem('userToken');
+          
+          // Используем setTimeout, чтобы предотвратить возможные рекурсивные циклы редиректов
+          setTimeout(() => {
+            window.location.href = '/login';
+            isRedirecting = false;
+          }, 100);
+          
+          throw new Error('Токен истек. Пожалуйста, войдите снова.');
+        }
+      } else {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
     return config;
   },
@@ -24,45 +108,104 @@ api.interceptors.request.use(
 // Интерцептор для обработки ошибок
 api.interceptors.response.use(
   (response) => {
-    console.log(`✅ Получен ответ: ${response.config.method?.toUpperCase()} ${response.config.url}`, response.data);
+    const requestDesc = `${response.config.method?.toUpperCase()} ${response.config.url}`;
+    console.log(`✅ Ответ получен: ${requestDesc}`);
     return response;
   },
   (error) => {
-    console.log(`❌ Ошибка запроса:`, error.config, error.response);
-    // Если ошибка 401 (неавторизован), выходим из аккаунта
-    if (error.response && error.response.status === 401) {
-      localStorage.removeItem('user');
-      localStorage.removeItem('userToken');
-      // Перенаправляем на страницу входа
-      window.location.href = '/login';
+    console.log(`❌ Ошибка запроса:`, error.message);
+    
+    // Обработка ошибок авторизации
+    if (error.response) {
+      // Если ошибка 401 (неавторизован)
+      if (error.response.status === 401) {
+        console.warn('Получен статус 401 Unauthorized');
+        
+        // Проверяем, не является ли запрос авторизационным
+        const isAuthRequest = error.config.url && (
+          error.config.url.includes('/auth/login') || 
+          error.config.url.includes('/auth/register')
+        );
+        
+        if (!isAuthRequest && !isRedirecting) {
+          // Помечаем, что перенаправление уже выполняется
+          isRedirecting = true;
+          
+          // Очищаем данные пользователя
+          localStorage.removeItem('user');
+          localStorage.removeItem('userToken');
+          
+          // Используем setTimeout, чтобы предотвратить возможные рекурсивные циклы редиректов
+          setTimeout(() => {
+            window.location.href = '/login';
+            isRedirecting = false;
+          }, 100);
+        }
+      }
     }
+    
     return Promise.reject(error);
   }
 );
 
-// Авторизация и управление пользователями
-export const authAPI = {
-  login: async (email: string, password: string) => {
-    // Используем формат x-www-form-urlencoded для OAuth2
-    const formData = new URLSearchParams();
-    formData.append('username', email); // FastAPI ожидает 'username' вместо 'email'
-    formData.append('password', password);
-    
-    const response = await axios.post(`${process.env.REACT_APP_API_URL}/auth/login`, formData, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-    });
-    return response.data;
+export interface LoginResponse {
+  _id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  token: string;
+  group?: string;
+  department?: string;
+}
+
+// Модуль API для работы с аутентификацией
+const authAPI = {
+  // Функция для входа в систему
+  async login(email: string, password: string): Promise<LoginResponse> {
+    try {
+      const response = await api.post('/auth/login', { email, password });
+      
+      // Сохраняем токен в заголовках для последующих запросов
+      api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+      
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при входе:', error);
+      throw error;
+    }
   },
-  register: async (userData: any) => {
-    const response = await api.post('/auth/register', userData);
-    return response.data;
+  
+  // Функция для регистрации
+  async register(userData: any): Promise<LoginResponse> {
+    try {
+      const response = await api.post('/auth/register', userData);
+      
+      // Сохраняем токен в заголовках для последующих запросов
+      api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+      
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при регистрации:', error);
+      throw error;
+    }
   },
-  getProfile: async () => {
-    const response = await api.get('/auth/profile');
-    return response.data;
+  
+  // Получение профиля текущего пользователя
+  async getProfile(): Promise<any> {
+    try {
+      const response = await api.get('/auth/user');
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при получении профиля:', error);
+      throw error;
+    }
   },
+  
+  // Функция для выхода из системы
+  logout() {
+    // Удаляем токен из заголовков
+    delete api.defaults.headers.common['Authorization'];
+  }
 };
 
 // Управление группами
@@ -157,6 +300,14 @@ export const gradesAPI = {
   },
   getByStudent: async (studentId: string) => {
     const response = await api.get(`/grades/student/${studentId}`);
+    return response.data;
+  },
+  getAnalytics: async () => {
+    const response = await api.get('/grades/analytics');
+    return response.data;
+  },
+  getExpulsionProbability: async () => {
+    const response = await api.get('/grades/expulsion-probability');
     return response.data;
   },
   create: async (gradeData: any) => {

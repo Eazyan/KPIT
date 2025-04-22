@@ -1,0 +1,399 @@
+.dashboard-container {
+  background-color: #f5f7ff;
+  min-height: 100vh;
+  padding: 20px;
+  overflow-x: hidden;
+}
+
+.grades-dashboard {
+  padding-top: 20px;
+  padding-bottom: 40px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Стилизация под существующий Layout */
+@media (min-width: 600px) {
+  .grades-dashboard {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+.top-header {
+  background-color: #144da0;
+  color: white;
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.search-bar {
+  background-color: rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  padding: 8px 15px;
+  display: flex;
+  align-items: center;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+.search-bar input {
+  background: transparent;
+  border: none;
+  color: white;
+  flex-grow: 1;
+  margin-left: 10px;
+  outline: none;
+}
+
+.search-bar input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.icon-buttons {
+  display: flex;
+  gap: 15px;
+}
+
+.stats-card {
+  background-color: white;
+  border-radius: 15px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  height: 100%;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease;
+  min-height: 180px;
+  overflow: hidden;
+  position: relative;
+}
+
+.stats-card:hover {
+  transform: translateY(-5px);
+}
+
+/* Стили для карточки среднего балла */
+.grade-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.grade-content {
+  padding-bottom: 10px;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.grade-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  width: 100%;
+}
+
+/* Стили для карточки посещаемости */
+.attendance-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.attendance-content {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  height: 100%;
+}
+
+.card-column {
+  flex: 1;
+}
+
+/* Убираем старые стили, которые могут конфликтовать */
+.attendance-stats-card {
+  display: none;
+}
+
+.grades-stats-card {
+  background-color: rgba(160, 84, 201, 0.15);
+  color: #333;
+  border-radius: 15px;
+  padding: 20px;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  height: 100%;
+  box-shadow: 0 4px 10px rgba(160, 84, 201, 0.2);
+  transition: transform 0.3s ease;
+}
+
+.grades-stats-card:hover {
+  transform: translateY(-5px);
+}
+
+.header-with-icon {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 5px 0;
+}
+
+.stat-label {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.white-card {
+  background-color: white;
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.3s ease;
+}
+
+.white-card:hover {
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+}
+
+.blue-card {
+  background-color: #3886f0;
+  color: white;
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.blue-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 12px rgba(56, 134, 240, 0.3);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.grades-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.grade-item {
+  background-color: rgba(56, 134, 240, 0.1);
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.grade-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.grade-value {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #3886f0;
+}
+
+.grade-percentage {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #3886f0;
+}
+
+.sidebar {
+  background-color: white;
+  border-radius: 15px;
+  padding: 20px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  height: 100%;
+}
+
+.sidebar-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 15px;
+  margin-bottom: 5px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.sidebar-menu-item:hover, .sidebar-menu-item.active {
+  background-color: rgba(56, 134, 240, 0.1);
+}
+
+.sidebar-menu-item.active {
+  color: #3886f0;
+}
+
+.sidebar-menu-item svg {
+  margin-right: 10px;
+}
+
+.attendance-chart {
+  width: 100%;
+  height: 250px;
+}
+
+.deviations-container {
+  background-color: #3886f0;
+  color: white;
+  border-radius: 10px;
+  padding: 15px;
+}
+
+.attendance-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.attendance-status {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 10px;
+}
+
+.status-lecture {
+  background-color: #4CAF50;
+}
+
+.status-learned {
+  background-color: #F44336;
+}
+
+/* Добавленные стили для новых компонентов */
+.discipline-progress {
+  margin-bottom: 20px;
+}
+
+.discipline-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.grade-row {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.2s ease;
+}
+
+.grade-row:hover {
+  background-color: rgba(56, 134, 240, 0.05);
+}
+
+.grade-row:last-child {
+  border-bottom: none;
+}
+
+.grade-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  margin-right: 15px;
+  color: white;
+}
+
+.grade-5 {
+  background-color: #4CAF50;
+}
+
+.grade-4 {
+  background-color: #8BC34A;
+}
+
+.grade-3 {
+  background-color: #FF9800;
+}
+
+.grade-2, .grade-1 {
+  background-color: #F44336;
+}
+
+/* Стили для карточки риска отчисления */
+.risk-card {
+  position: relative;
+  overflow: hidden;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  min-height: 180px;
+  transition: all 0.3s ease;
+  margin-bottom: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+.risk-content {
+  padding-bottom: 10px;
+}
+
+.risk-title {
+  display: flex;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.trend-indicator {
+  margin-top: 15px;
+}
+
+.trend-line {
+  height: 4px;
+  border-radius: 2px;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.trend-value {
+  display: flex;
+  align-items: center;
+}
+
+.trend-content {
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  padding-top: 10px;
+}
+
+.trend-title {
+  margin-bottom: 5px;
+}
+
+.trend-icon {
+  display: flex;
+  align-items: center;
+} 

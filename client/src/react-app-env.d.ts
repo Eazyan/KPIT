@@ -11,3 +11,8 @@ declare module 'react-icons/fa' {
   export const FaEye: IconType;
   export const FaBug: IconType;
 }
+
+// Добавляем декларацию типа для Buffer в глобальном объекте window
+interface Window {
+    Buffer: typeof Buffer;
+}

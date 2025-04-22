@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Box, 
   Typography, 
@@ -6,9 +6,10 @@ import {
   Button, 
   Paper,
   Container,
-  Alert
+  Alert,
+  CircularProgress
 } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useContext } from 'react';
 import { AuthContext } from '../../context/AuthContext';
 
@@ -17,23 +18,50 @@ const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const navigate = useNavigate();
-  const { login } = useContext(AuthContext);
+  const location = useLocation();
+  const { login, user } = useContext(AuthContext);
+
+  // Если пользователь уже авторизован, перенаправляем на главную
+  useEffect(() => {
+    if (user) {
+      navigate('/');
+    }
+  }, [user, navigate]);
+  
+  // Очищаем ошибку при изменении полей
+  useEffect(() => {
+    if (error) {
+      setError(null);
+    }
+  }, [email, password]);
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Предотвращаем повторные отправки формы
+    if (isSubmitting) return;
+    
     setLoading(true);
     setError(null);
+    setIsSubmitting(true);
     
     try {
+      console.log('Попытка входа:', { email });
       await login(email, password);
+      console.log('Вход успешен, перенаправление на главную страницу');
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Ошибка при входе в систему');
+      console.error('Ошибка при входе:', err);
+      const errorMessage = err.response?.data?.detail || 
+                         err.message || 
+                         'Ошибка при входе в систему. Проверьте данные и попробуйте снова.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
+      setIsSubmitting(false);
     }
   };
   
@@ -84,6 +112,7 @@ const LoginPage: React.FC = () => {
               required
               autoFocus
               variant="outlined"
+              disabled={loading}
             />
             
             <TextField
@@ -95,6 +124,7 @@ const LoginPage: React.FC = () => {
               margin="normal"
               required
               variant="outlined"
+              disabled={loading}
             />
             
             <Button
@@ -102,10 +132,15 @@ const LoginPage: React.FC = () => {
               fullWidth
               variant="contained"
               color="primary"
-              disabled={loading}
+              disabled={loading || isSubmitting}
               sx={{ mt: 3, mb: 2, py: 1.5, borderRadius: 2 }}
             >
-              {loading ? 'Вход...' : 'Войти'}
+              {loading ? (
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CircularProgress size={24} sx={{ mr: 1 }} color="inherit" />
+                  Вход...
+                </Box>
+              ) : 'Войти'}
             </Button>
           </form>
         </Paper>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, CssBaseline } from '@mui/material';
-import { createTheme } from '@mui/material/styles';
+import customTheme from './styles/theme';
 import { AuthProvider } from './context/AuthContext';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/Auth/LoginPage';
@@ -11,23 +11,9 @@ import StudentQrScanner from './pages/Attendance/StudentQrScanner';
 import StudentAttendance from './pages/Attendance/StudentAttendance';
 import AdminAttendance from './pages/Attendance/AdminAttendance';
 import MyGrades from './pages/MyGrades/index';
+import GradeJournal from './pages/MyGrades/GradeJournal';
 import Layout from './components/Layout/Layout';
 import './App.css';
-
-// Создаем тему для материал дизайна
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#f50057',
-    },
-  },
-  typography: {
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
-  },
-});
 
 // Это тестовый комментарий для проверки горячей перезагрузки
 
@@ -37,7 +23,7 @@ function App() {
   console.log(testHotReload);
   
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={customTheme}>
       <CssBaseline />
       <AuthProvider>
         <Router>
@@ -57,6 +43,7 @@ function App() {
             
             {/* Маршрут для страницы оценок */}
             <Route path="/grades" element={<Layout><MyGrades /></Layout>} />
+            <Route path="/grades/journal" element={<Layout><GradeJournal /></Layout>} />
             
             {/* Устаревшие маршруты для обратной совместимости */}
             <Route path="/attendance" element={<Layout><TeacherAttendance /></Layout>} />

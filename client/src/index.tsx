@@ -3,6 +3,9 @@ import ReactDOM from 'react-dom';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
+// Добавляем глобальный полифилл для Buffer
+import { Buffer } from 'buffer';
+window.Buffer = Buffer;
 
 ReactDOM.render(
   <React.StrictMode>

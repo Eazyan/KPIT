@@ -37,10 +37,12 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Opt
             logger.warning("Получен пустой payload при декодировании токена")
             return None
             
-        user_id = payload.get("sub")
+        # Проверяем обе возможные ключи для id: "sub" (стандартное) и "id" (наше приложение)
+        user_id = payload.get("sub") or payload.get("id")
         user_role = payload.get("role")
         
-        logger.debug(f"Данные из токена: user_id={user_id}, role={user_role}")
+        # Дополнительное логирование для диагностики
+        logger.info(f"Расшифрованные данные из токена: user_id={user_id}, role={user_role}, полный payload: {payload}")
         
         if not user_id or not user_role:
             logger.warning(f"Отсутствуют обязательные поля в токене: id={user_id}, role={user_role}")
@@ -65,48 +67,50 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Opt
         return None
 
 async def get_current_active_user(
-    current_user: Optional[TokenData] = Depends(get_current_user)
-) -> UserInDB:
+    current_user: UserInDB = Depends(get_current_user),
+):
     """
-    Проверка, что токен содержит валидного пользователя
-    
-    Args:
-        current_user: Данные пользователя из токена
-        
-    Returns:
-        UserInDB: Полные данные пользователя из базы данных
-        
-    Raises:
-        HTTPException: Если токен недействителен или отсутствует
+    Получение активного пользователя из базы данных
     """
-    logger.debug(f"get_current_active_user вызван с current_user={current_user}")
-    if not current_user:
-        logger.warning("Пользователь не аутентифицирован (current_user is None)")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Необходима авторизация. Токен недействителен или отсутствует.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Получаем полные данные пользователя из базы данных
     try:
-        user = users_collection.find_one({"_id": ObjectId(current_user.id)})
-        if not user:
-            logger.warning(f"Пользователь с ID {current_user.id} не найден в базе данных")
+        # Проверка получен ли пользователь
+        if not current_user:
+            logger.error(f"Не удалось получить активного пользователя: пользователь не найден")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Пользователь не найден в базе данных",
+                detail="Не удалось аутентифицировать пользователя",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Извлекаем ID пользователя
+        user_id = None
+        if hasattr(current_user, 'id'):
+            user_id = current_user.id
+        elif hasattr(current_user, '_id'):
+            user_id = current_user._id
+        elif isinstance(current_user, dict):
+            user_id = current_user.get('id') or current_user.get('_id')
+        
+        if not user_id:
+            logger.error(f"Не удалось определить ID пользователя: {current_user}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Некорректные данные пользователя",
                 headers={"WWW-Authenticate": "Bearer"},
             )
             
-        logger.debug(f"Возвращаем пользователя из БД: id={user['_id']}, name={user.get('name')}, role={user.get('role')}")
-        return user
+        logger.debug(f"Успешно получен активный пользователь с ID: {user_id}")
+        return current_user
     
+    except HTTPException:
+        # Пробрасываем HTTP ошибки дальше
+        raise
     except Exception as e:
-        logger.error(f"Ошибка при получении пользователя из базы данных: {str(e)}")
+        logger.exception(f"Ошибка при получении активного пользователя: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Ошибка при получении данных пользователя",
+            detail=f"Внутренняя ошибка сервера при проверке пользователя",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 def check_roles(allowed_roles: List[UserRole]):

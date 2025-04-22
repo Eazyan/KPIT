@@ -1,18 +1,29 @@
 #!/usr/bin/env python3
 """
-Скрипт для генерации большого количества тестовых пользователей
+Скрипт для генерации всех тестовых данных для проекта КПиУС:
+- пользователи (студенты, преподаватели, администраторы)
+- группы
+- дисциплины
+- оценки
 """
 
 import logging
 import random
-from app.core.database import db, users_collection, groups_collection, disciplines_collection
-from app.models.user import UserRole
-from app.core.security import get_password_hash
-from datetime import datetime, timedelta
-from bson import ObjectId
 import os
+from datetime import datetime, timedelta
+from pymongo import MongoClient
+from bson import ObjectId
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
+
+# Импорт необходимых модулей из приложения
+try:
+    from app.core.database import db, users_collection, groups_collection, disciplines_collection
+    from app.models.user import UserRole
+    from app.core.security import get_password_hash
+    APP_IMPORTS_AVAILABLE = True
+except ImportError:
+    APP_IMPORTS_AVAILABLE = False
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -124,17 +135,59 @@ def generate_student_group(course=None, specialization=None):
     number = random.randint(1, 3)
     return f"Б{last_two_digits}{course}{number}-{code}"
 
-def create_users(count=100, clear_db=False):
-    """Генерирует указанное количество случайных пользователей"""
+# Функция для получения хэша пароля (если нет импорта из приложения)
+def fallback_get_password_hash(password):
+    """Простая функция хеширования для случая, когда нет доступа к app.core.security"""
+    import hashlib
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def hash_password(password):
+    """Хеширует пароль, используя функцию из приложения или запасную"""
+    if APP_IMPORTS_AVAILABLE:
+        return get_password_hash(password)
+    else:
+        return fallback_get_password_hash(password)
+
+def connect_db():
+    """Подключается к базе данных и возвращает необходимые коллекции"""
+    global db, users_collection, groups_collection, disciplines_collection, grades_collection
+
+    if APP_IMPORTS_AVAILABLE:
+        # Если импорты доступны, используем объекты из app.core.database
+        grades_collection = db["grades"]
+        logger.info("Используем подключение к БД из приложения")
+        return db, users_collection, groups_collection, disciplines_collection, grades_collection
+    else:
+        # Иначе создаем новое подключение
+        mongo_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+        db_name = os.getenv("DATABASE_NAME", "kpiusdb")
+        logger.info(f"Подключение к MongoDB: {mongo_url}, база данных: {db_name}")
+        
+        client = MongoClient(mongo_url)
+        db = client[db_name]
+        
+        users_collection = db["users"]
+        groups_collection = db["groups"]
+        disciplines_collection = db["disciplines"]
+        grades_collection = db["grades"]
+        
+        return db, users_collection, groups_collection, disciplines_collection, grades_collection
+
+def create_test_data(count=100, clear_db=False):
+    """Генерирует все тестовые данные - пользователей, группы, дисциплины"""
     try:
+        # Подключаемся к базе данных
+        db, users_collection, groups_collection, disciplines_collection, grades_collection = connect_db()
+        
         if clear_db:
             # Очистка коллекций
             logger.info("Очистка существующих данных...")
             users_collection.delete_many({})
             groups_collection.delete_many({})
             disciplines_collection.delete_many({})
+            grades_collection.delete_many({})
         
-        # Создаем 5 групп на разных специализациях и курсах
+        # Создаем группы
         logger.info("Создание учебных групп...")
         specializations = [
             "Прикладная математика и информатика",
@@ -171,16 +224,16 @@ def create_users(count=100, clear_db=False):
             {
                 "name": "Администратор Системы",
                 "email": "admin@dvfu.ru",
-                "password_hash": get_password_hash("admin123"),
-                "role": UserRole.ADMIN,
+                "password_hash": hash_password("admin123"),
+                "role": "admin" if not APP_IMPORTS_AVAILABLE else UserRole.ADMIN,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             },
             {
                 "name": "Заведующий Кафедрой",
                 "email": "head@dvfu.ru",
-                "password_hash": get_password_hash("teacher123"),
-                "role": UserRole.HEAD_OF_DEPARTMENT,
+                "password_hash": hash_password("teacher123"),
+                "role": "head_of_department" if not APP_IMPORTS_AVAILABLE else UserRole.HEAD_OF_DEPARTMENT,
                 "department": "Информатика и вычислительная техника",
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
@@ -188,8 +241,8 @@ def create_users(count=100, clear_db=False):
             {
                 "name": "Преподаватель Тестовый",
                 "email": "teacher@dvfu.ru",
-                "password_hash": get_password_hash("teacher123"),
-                "role": UserRole.TEACHER,
+                "password_hash": hash_password("teacher123"),
+                "role": "teacher" if not APP_IMPORTS_AVAILABLE else UserRole.TEACHER,
                 "department": "Информатика и вычислительная техника",
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
@@ -197,8 +250,8 @@ def create_users(count=100, clear_db=False):
             {
                 "name": "Студент Тестовый",
                 "email": "student@dvfu.ru",
-                "password_hash": get_password_hash("student123"),
-                "role": UserRole.STUDENT,
+                "password_hash": hash_password("student123"),
+                "role": "student" if not APP_IMPORTS_AVAILABLE else UserRole.STUDENT,
                 "group": group_names[0],
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
@@ -229,8 +282,8 @@ def create_users(count=100, clear_db=False):
             teacher = {
                 "name": full_name,
                 "email": email,
-                "password_hash": get_password_hash("teacher123"),
-                "role": UserRole.TEACHER,
+                "password_hash": hash_password("teacher123"),
+                "role": "teacher" if not APP_IMPORTS_AVAILABLE else UserRole.TEACHER,
                 "department": department,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
@@ -248,72 +301,46 @@ def create_users(count=100, clear_db=False):
         if test_teacher_id:
             logger.info("Назначение дисциплин тестовому преподавателю...")
             
-            # Получаем группу тестового студента
-            test_student = users_collection.find_one({"email": "student@dvfu.ru"})
-            test_student_group_name = test_student["group"] if test_student else group_names[0]
-            logger.info(f"Группа тестового студента: {test_student_group_name}")
-            
-            # Находим группу по имени
-            test_student_group = groups_collection.find_one({"name": test_student_group_name})
-            if not test_student_group:
-                logger.warning(f"Группа {test_student_group_name} не найдена!")
-            else:
-                logger.info(f"ID группы студента: {test_student_group['_id']}")
-                
-                # Первая дисциплина обязательно для группы тестового студента
-                subject_name = SUBJECT_NAMES[0]
-                semester = random.randint(1, 8)
-                
-                discipline = {
-                    "name": subject_name,
-                    "teacher": test_teacher_id,
-                    "semester": semester,
-                    "groups": [test_student_group["_id"]],  # Назначаем только группу тестового студента
-                    "department": "Информатика и вычислительная техника",
-                    "created_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow()
-                }
-                
-                result = disciplines_collection.insert_one(discipline)
-                disciplines.append({"id": result.inserted_id, "data": discipline})
-                logger.info(f"Создана дисциплина для тестового преподавателя и группы тестового студента: {subject_name}")
-            
-            # Добавляем еще дисциплины с другими группами
-            for i in range(1, 3):
+            # Создаем 5 дисциплин для тестового преподавателя
+            for i in range(5):
                 subject_name = SUBJECT_NAMES[i]
-                # Назначаем по 2 случайные группы для остальных дисциплин
-                subject_groups = random.sample(groups, 2)
-                semester = random.randint(1, 8)
+                semester = random.randint(1, 2)
+                
+                # Выбираем несколько групп для дисциплины
+                discipline_groups = random.sample(groups, random.randint(1, 3))
+                group_ids = [str(g["id"]) for g in discipline_groups]
                 
                 discipline = {
                     "name": subject_name,
                     "teacher": test_teacher_id,
                     "semester": semester,
-                    "groups": [group["id"] for group in subject_groups],
-                    "department": "Информатика и вычислительная техника",
+                    "groups": group_ids,
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow()
                 }
                 
                 result = disciplines_collection.insert_one(discipline)
                 disciplines.append({"id": result.inserted_id, "data": discipline})
-                logger.info(f"Создана дисциплина для тестового преподавателя: {subject_name}")
+                logger.info(f"Создана дисциплина: {subject_name} (преподаватель: test)")
         
-        # Затем назначаем дисциплины случайным преподавателям
+        # Затем генерируем дисциплины для остальных преподавателей
         for teacher in teachers:
-            # Каждый преподаватель ведет от 1 до 3 дисциплин
-            for _ in range(random.randint(1, 3)):
+            # Для каждого преподавателя генерируем 2-4 дисциплины
+            num_disciplines = random.randint(2, 4)
+            
+            for _ in range(num_disciplines):
                 subject_name = random.choice(SUBJECT_NAMES)
-                # Выбираем случайные группы (от 1 до 3) для дисциплины
-                subject_groups = random.sample(groups, random.randint(1, 3))
-                semester = random.randint(1, 8)
+                semester = random.randint(1, 2)
+                
+                # Выбираем несколько групп для дисциплины
+                discipline_groups = random.sample(groups, random.randint(1, 3))
+                group_ids = [str(g["id"]) for g in discipline_groups]
                 
                 discipline = {
                     "name": subject_name,
                     "teacher": teacher["id"],
                     "semester": semester,
-                    "groups": [group["id"] for group in subject_groups],
-                    "department": teacher["data"]["department"],
+                    "groups": group_ids,
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow()
                 }
@@ -323,30 +350,34 @@ def create_users(count=100, clear_db=False):
                 logger.info(f"Создана дисциплина: {subject_name} (преподаватель: {teacher['data']['name']})")
         
         # Генерируем студентов
-        student_count = count - teacher_count - len(default_users)
+        student_count = count - teacher_count
         logger.info(f"Генерация {student_count} студентов...")
         
+        students = []
         for i in range(student_count):
             first_name, last_name, gender = generate_random_name()
             full_name = f"{last_name} {first_name}"
             email = generate_email(first_name, last_name)
-            group = random.choice(group_names)
+            
+            # Выбираем случайную группу
+            group = random.choice(groups)
+            group_name = group["data"]["name"]
             
             student = {
                 "name": full_name,
                 "email": email,
-                "password_hash": get_password_hash("student123"),
-                "role": UserRole.STUDENT,
-                "group": group,
+                "password_hash": hash_password("student123"),
+                "role": "student" if not APP_IMPORTS_AVAILABLE else UserRole.STUDENT,
+                "group": group_name,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
             
             result = users_collection.insert_one(student)
-            if i % 10 == 0:  # Логируем каждого 10-го студента для уменьшения вывода
-                logger.info(f"Создан студент #{i+1}: {full_name} (группа: {group})")
+            students.append({"id": result.inserted_id, "data": student})
+            if i % 10 == 0:
+                logger.info(f"Создано студентов: {i+1}/{student_count}")
         
-        logger.info("\nБаза данных успешно заполнена тестовыми пользователями.")
         logger.info("Предопределенные учетные данные для входа:")
         logger.info(" - Администратор: admin@dvfu.ru / admin123")
         logger.info(" - Заведующий кафедрой: head@dvfu.ru / teacher123")
@@ -359,88 +390,95 @@ def create_users(count=100, clear_db=False):
         logger.info(f" - Студентов: {student_count}")
         logger.info(f" - Дисциплин: {len(disciplines)}")
         
+        # Генерация оценок
+        generate_test_grades()
+        
     except Exception as e:
         logger.error(f"Ошибка при заполнении базы данных: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
 
-async def generate_test_grades():
+def generate_test_grades():
     """
-    Генерирует тестовые оценки для тестового студента
+    Генерирует тестовые оценки для студентов с улучшенной структурой,
+    совместимой с компонентом журнала оценок GradeJournal.tsx
     """
-    logger.info("Генерация тестовых оценок для тестового студента")
+    logger.info("Генерация тестовых оценок...")
     
     # Находим тестового студента
     test_student = users_collection.find_one({"email": "student@dvfu.ru"})
     if not test_student:
-        logger.error("Тестовый студент не найден")
+        logger.error("Тестовый студент не найден. Невозможно сгенерировать оценки.")
         return
     
-    student_id = str(test_student["_id"])
-    logger.info(f"Найден тестовый студент с ID: {student_id}")
+    test_student_id = test_student["_id"]
+    logger.info(f"Найден тестовый студент: {test_student['name']} (ID: {test_student_id})")
     
-    # Находим дисциплины для группы студента
-    group_name = test_student.get("group")
-    if not group_name:
-        logger.error("У тестового студента не указана группа")
+    # Удаляем все существующие оценки для тестового студента
+    result = grades_collection.delete_many({"student_id": str(test_student_id)})
+    logger.info(f"Удалено {result.deleted_count} старых оценок для тестового студента")
+    
+    # Находим все дисциплины
+    all_disciplines = list(disciplines_collection.find())
+    
+    if not all_disciplines:
+        logger.error("Дисциплины не найдены. Невозможно сгенерировать оценки.")
         return
     
-    group = db["groups"].find_one({"name": group_name})
-    if not group:
-        logger.error(f"Группа {group_name} не найдена")
-        return
+    logger.info(f"Найдено {len(all_disciplines)} дисциплин")
     
-    # Получаем все дисциплины для группы студента
-    disciplines = list(disciplines_collection.find({"groups": {"$in": [str(group["_id"])]}}))
+    # Обновляем формат дисциплин для совместимости с журналом
+    for discipline in all_disciplines:
+        # Добавляем поле discipline_id для совместимости с журналом
+        if "_id" in discipline and "discipline_id" not in discipline:
+            disciplines_collection.update_one(
+                {"_id": discipline["_id"]},
+                {"$set": {
+                    "discipline_id": str(discipline["_id"]),
+                    "discipline_name": discipline.get("name", "Неизвестная дисциплина")
+                }}
+            )
+            logger.info(f"Обновлена структура дисциплины: {discipline.get('name', 'Неизвестная дисциплина')}")
     
-    if not disciplines:
-        logger.error(f"Дисциплины для группы {group_name} не найдены")
-        return
+    # Обновляем дисциплины после изменений
+    all_disciplines = list(disciplines_collection.find())
     
-    logger.info(f"Найдено {len(disciplines)} дисциплин для группы {group_name}")
+    # Генерируем даты для оценок (за последние 3 месяца)
+    today = datetime.now()
+    start_date = today - timedelta(days=90)
     
-    # Создаем коллекцию для оценок, если её ещё нет
-    if "grades" not in db.list_collection_names():
-        db.create_collection("grades")
+    # Типы оценок в соответствии с интерфейсом GradeItem из журнала
+    grade_types = ["Экзамен", "Тест", "Домашняя работа", "Проект", "Активность", "Опрос", "Лабораторная"]
     
-    grades_collection = db["grades"]
-    
-    # Удаляем старые оценки тестового студента
-    grades_collection.delete_many({"student_id": student_id})
-    
-    # Типы оценок
-    grade_types = ["exam", "test", "homework", "project", "activity"]
-    
-    # Для каждой дисциплины генерируем несколько оценок
+    # Для тестового студента создаем оценки по всем дисциплинам
     total_grades = 0
     
-    for discipline in disciplines:
-        discipline_id = str(discipline["_id"])
+    # Для каждой дисциплины генерируем оценки
+    for discipline in all_disciplines:
+        discipline_id = discipline.get("discipline_id", str(discipline["_id"]))
+        discipline_name = discipline.get("discipline_name", discipline.get("name", "Неизвестная дисциплина"))
         
-        # Генерируем от 5 до 15 оценок для дисциплины
-        num_grades = random.randint(5, 15)
-        
-        # Находим преподавателя для этой дисциплины
+        # Находим преподавателя дисциплины
         teacher_id = discipline.get("teacher")
         if not teacher_id:
-            # Если не указан преподаватель, берем первого из списка преподавателей
             teacher = users_collection.find_one({"role": "teacher"})
-            teacher_id = str(teacher["_id"]) if teacher else None
+            teacher_id = teacher["_id"] if teacher else None
         
-        if not teacher_id:
-            logger.warning(f"Не найден преподаватель для дисциплины {discipline.get('name')}")
-            continue
-            
-        # Даты для оценок (за последние 3 месяца)
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=90)
+        # Количество оценок варьируется для разных дисциплин
+        num_grades = random.randint(5, 15)
+        logger.info(f"Генерация {num_grades} оценок для дисциплины '{discipline_name}'")
+        
+        # Собираем оценки по этой дисциплине для вычисления средней оценки
+        discipline_grades = []
         
         for i in range(num_grades):
             # Генерируем случайную дату в диапазоне последних 3 месяцев
-            grade_date = start_date + timedelta(
-                seconds=random.randint(0, int((end_date - start_date).total_seconds()))
-            )
+            random_days = random.randint(0, 90)
+            grade_date = start_date + timedelta(days=random_days)
+            grade_date_str = grade_date.strftime('%Y-%m-%d')  # Формат даты, ожидаемый журналом
             
-            # Для первой дисциплины добавляем оценки всех типов
-            if disciplines.index(discipline) == 0:
+            # Для первой дисциплины добавляем оценки всех типов для лучшей визуализации аналитики
+            if all_disciplines.index(discipline) == 0:
                 # Для разнообразия анализа добавляем оценки от 1 до 5
                 values = [1, 2, 3, 4, 5]
                 value = values[i % len(values)]
@@ -451,48 +489,123 @@ async def generate_test_grades():
                 value = random.choices([1, 2, 3, 4, 5], weights=[1, 1, 3, 4, 3])[0]
                 grade_type = random.choice(grade_types)
             
-            # Создаем оценку
+            # Создаем оценку в формате, совместимом с интерфейсом GradeItem
             grade = {
-                "student_id": student_id,
+                "student_id": str(test_student_id),
                 "discipline_id": discipline_id,
-                "value": value,
+                "discipline_name": discipline_name,
+                "value": str(value),  # Преобразуем в строку для совместимости с GradeItem.value
                 "type": grade_type,
-                "description": f"Оценка за {grade_type}",
-                "date": grade_date,
-                "weight": random.choice([0.5, 1.0, 1.5, 2.0]),  # Разные веса оценок
+                "description": f"Оценка за {grade_type.lower()}",
+                "date": grade_date_str,
+                "weight": random.choice([0.5, 1.0, 1.5, 2.0]),  # Разные веса оценок для реалистичности
                 "created_at": datetime.utcnow(),
-                "created_by": teacher_id
+                "created_by": str(teacher_id) if teacher_id else None
             }
             
             result = grades_collection.insert_one(grade)
-            if result.inserted_id:
-                total_grades += 1
+            # Добавляем id в формате, ожидаемом GradeItem
+            grades_collection.update_one(
+                {"_id": result.inserted_id},
+                {"$set": {"id": str(result.inserted_id)}}
+            )
+            
+            discipline_grades.append(value)
+            total_grades += 1
+        
+        # Вычисляем и обновляем среднюю оценку для дисциплины
+        if discipline_grades:
+            average_grade = sum(discipline_grades) / len(discipline_grades)
+            disciplines_collection.update_one(
+                {"_id": discipline["_id"]},
+                {"$set": {"average_grade": average_grade}}
+            )
+            logger.info(f"Обновлена средняя оценка для дисциплины '{discipline_name}': {average_grade:.2f}")
     
     logger.info(f"Сгенерировано {total_grades} оценок для тестового студента")
-
-async def main():
-    logger.info("Начало генерации оценок")
     
-    # Подключение к MongoDB
-    client = AsyncIOMotorClient(os.getenv("MONGODB_URL", "mongodb://localhost:27017/ksu"))
-    global db, users_collection, disciplines_collection
-    db = client["ksu"]
-    users_collection = db["users"]
-    disciplines_collection = db["disciplines"]
+    # Генерируем оценки для других студентов для более полной аналитики
+    other_students = list(users_collection.find({"role": "student", "_id": {"$ne": test_student_id}}).limit(10))
     
-    # Запускаем только генерацию оценок
-    await generate_test_grades()
+    for student in other_students:
+        student_id = student["_id"]
+        student_name = student.get("name", "Неизвестный студент")
+        
+        # Для каждого студента генерируем оценки по нескольким дисциплинам
+        selected_disciplines = random.sample(all_disciplines, min(4, len(all_disciplines)))
+        student_grades = 0
+        
+        for discipline in selected_disciplines:
+            discipline_id = discipline.get("discipline_id", str(discipline["_id"]))
+            discipline_name = discipline.get("discipline_name", discipline.get("name", "Неизвестная дисциплина"))
+            
+            # Преподаватель дисциплины
+            teacher_id = discipline.get("teacher")
+            if not teacher_id:
+                teacher = users_collection.find_one({"role": "teacher"})
+                teacher_id = teacher["_id"] if teacher else None
+            
+            # От 3 до 8 оценок по каждой дисциплине
+            num_grades = random.randint(3, 8)
+            
+            for _ in range(num_grades):
+                # Генерируем случайную дату
+                random_days = random.randint(0, 90)
+                grade_date = start_date + timedelta(days=random_days)
+                grade_date_str = grade_date.strftime('%Y-%m-%d')
+                
+                # Для них тоже генерируем разные оценки
+                value = random.choices([1, 2, 3, 4, 5], weights=[1, 2, 3, 4, 2])[0]
+                grade_type = random.choice(grade_types)
+                
+                grade = {
+                    "student_id": str(student_id),
+                    "discipline_id": discipline_id,
+                    "discipline_name": discipline_name,
+                    "value": str(value),
+                    "type": grade_type,
+                    "description": f"Оценка за {grade_type.lower()}",
+                    "date": grade_date_str,
+                    "weight": random.choice([0.5, 1.0, 1.5, 2.0]),
+                    "created_at": datetime.utcnow(),
+                    "created_by": str(teacher_id) if teacher_id else None
+                }
+                
+                result = grades_collection.insert_one(grade)
+                # Добавляем id в формате, ожидаемом GradeItem
+                grades_collection.update_one(
+                    {"_id": result.inserted_id},
+                    {"$set": {"id": str(result.inserted_id)}}
+                )
+                
+                student_grades += 1
+        
+        logger.info(f"Сгенерировано {student_grades} оценок для студента {student_name}")
+        total_grades += student_grades
     
-    logger.info("Генерация оценок завершена")
+    logger.info(f"Всего сгенерировано {total_grades} оценок")
 
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description='Генерация тестовых пользователей для системы')
+    parser = argparse.ArgumentParser(description='Генерация тестовых данных для системы КПиУС')
     parser.add_argument('--count', type=int, default=100, help='Общее количество пользователей (включая предопределенных)')
     parser.add_argument('--clear', action='store_true', help='Очистить базу данных перед заполнением')
+    parser.add_argument('--grades-only', action='store_true', help='Сгенерировать только оценки')
     
     args = parser.parse_args()
     
-    create_users(count=args.count, clear_db=args.clear)
-    asyncio.run(main()) 
+    try:
+        if args.grades_only:
+            # Подключаемся к базе данных и генерируем только оценки
+            db, users_collection, groups_collection, disciplines_collection, grades_collection = connect_db()
+            generate_test_grades()
+        else:
+            # Генерируем все тестовые данные
+            create_test_data(count=args.count, clear_db=args.clear)
+            
+        logger.info("Генерация тестовых данных успешно завершена")
+    except Exception as e:
+        logger.error(f"Ошибка при генерации тестовых данных: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc()) 

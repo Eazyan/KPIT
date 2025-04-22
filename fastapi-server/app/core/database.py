@@ -18,4 +18,5 @@ db: Database = client[DATABASE_NAME]
 users_collection = db.users
 groups_collection = db.groups
 disciplines_collection = db.disciplines
-attendance_collection = db.attendance 
+attendance_collection = db.attendance
+grades_collection = db.grades 
