@@ -68,13 +68,16 @@ async def add_grade(
         )
 
 # Роут для получения всех оценок студента
-@router.get("/student", response_model=List[Dict[str, Any]])
+@router.get("/student", response_model=Dict[str, Any])
 async def get_student_grades(current_user: TokenData = Depends(get_current_active_user)):
     """
     Получить все оценки текущего студента
     """
     try:
         user_id = current_user.id if hasattr(current_user, "id") else str(current_user["_id"])
+        
+        # Получаем аналитику, которая содержит и статистику, и недавние оценки
+        analytics = await GradeAnalyticsService.get_student_grade_analytics(user_id)
         
         # Находим все оценки для данного студента (синхронный вызов)
         grades = list(grades_collection.find({"student_id": user_id}))
@@ -101,8 +104,19 @@ async def get_student_grades(current_user: TokenData = Depends(get_current_activ
             if "date" in grade and not isinstance(grade["date"], str):
                 grade["date"] = grade["date"].strftime("%Y-%m-%d")
         
+        # Создаем результирующий объект, содержащий и оценки, и статистику
+        result = {
+            "grades": grades,
+            "stats": {
+                "overall_average": analytics.get("overall_stats", {}).get("average", 0),
+                "distribution": analytics.get("overall_stats", {}).get("distribution", {}),
+                "type_averages": analytics.get("overall_stats", {}).get("type_averages", {}),
+                "disciplines": analytics.get("disciplines", [])
+            }
+        }
+        
         # Преобразуем все ObjectId в строки перед возвращением
-        return GradeAnalyticsService.convert_objectid(grades)
+        return GradeAnalyticsService.convert_objectid(result)
     except Exception as e:
         logger.error(f"Непредвиденная ошибка при получении оценок: {str(e)}")
         raise HTTPException(

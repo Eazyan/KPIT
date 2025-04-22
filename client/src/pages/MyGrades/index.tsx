@@ -211,6 +211,25 @@ const MyGrades: React.FC = () => {
         // Сохраняем данные для дальнейшего использования
         setGradeAnalytics(analyticsResponse.data);
         
+        // Получаем данные также из эндпоинта student, который теперь содержит и оценки, и статистику
+        try {
+          const studentGradesResponse = await api.get('/grades/student');
+          console.log('Данные из /grades/student:', studentGradesResponse.data);
+          
+          // Если студент эндпоинт вернул статистику, обновляем данные
+          if (studentGradesResponse.data && studentGradesResponse.data.stats) {
+            console.log('Найдена статистика в /grades/student:', studentGradesResponse.data.stats);
+            // Обновляем аналитику, так как статистика из /grades/student более актуальна
+            setGradeAnalytics({
+              ...analyticsResponse.data,
+              overall_stats: studentGradesResponse.data.stats.overall_stats || analyticsResponse.data.overall_stats,
+              disciplines: studentGradesResponse.data.stats.disciplines || analyticsResponse.data.disciplines
+            });
+          }
+        } catch (studentGradesError) {
+          console.error('Ошибка при получении данных из /grades/student:', studentGradesError);
+        }
+        
         // Проверка структуры с созданием примера, если данных нет
         const exampleData = {
           "overall_stats": {
@@ -401,7 +420,18 @@ const MyGrades: React.FC = () => {
     console.log('Попытка получить средний балл из данных:', gradeAnalytics);
     
     // Проверяем все возможные пути к значению среднего балла
-    if (typeof gradeAnalytics.overall_average === 'number') {
+    // Новый путь из /grades/student
+    if (gradeAnalytics.overall_stats && typeof gradeAnalytics.overall_stats.average === 'number') {
+      overallAverage = gradeAnalytics.overall_stats.average.toFixed(2);
+      console.log('Найден overall_stats.average из /grades/student (number):', gradeAnalytics.overall_stats.average);
+    }
+    else if (gradeAnalytics.overall_stats && typeof gradeAnalytics.overall_stats.average === 'string' && 
+             !isNaN(parseFloat(gradeAnalytics.overall_stats.average))) {
+      overallAverage = parseFloat(gradeAnalytics.overall_stats.average).toFixed(2);
+      console.log('Найден overall_stats.average из /grades/student (string):', gradeAnalytics.overall_stats.average);
+    }
+    // Оставшиеся пути
+    else if (typeof gradeAnalytics.overall_average === 'number') {
       overallAverage = gradeAnalytics.overall_average.toFixed(2);
       console.log('Найден overall_average (number):', gradeAnalytics.overall_average);
     } 

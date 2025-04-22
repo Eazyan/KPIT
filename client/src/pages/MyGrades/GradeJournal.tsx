@@ -72,6 +72,14 @@ interface GradeJournalFilters {
   gradeType: string;
 }
 
+// Интерфейс для статистики
+interface GradeStats {
+  overall_average: number;
+  distribution: { [key: string]: number };
+  type_averages: { [key: string]: number };
+  disciplines: any[];
+}
+
 // Вспомогательная функция для определения цвета оценки
 const getGradeColor = (grade: string | number): string => {
   const numGrade = typeof grade === 'string' ? parseFloat(grade) : grade;
@@ -81,6 +89,16 @@ const getGradeColor = (grade: string | number): string => {
   if (numGrade >= 3.0) return '#ffb74d';
   if (numGrade >= 2.0) return '#ff9800';
   return '#f44336';
+};
+
+// Функция для подсчета процента хороших и отличных оценок из распределения
+const calculateGoodGradePercentage = (distribution: { [key: string]: number }): number => {
+  const total = Object.values(distribution).reduce((sum, count) => sum + count, 0);
+  if (total === 0) return 0;
+  
+  // Хорошие оценки - 4 и 5
+  const goodGrades = (distribution['4'] || 0) + (distribution['5'] || 0);
+  return Math.round((goodGrades / total) * 100);
 };
 
 // Основной компонент страницы журнала оценок
@@ -94,6 +112,7 @@ const GradeJournal: React.FC = () => {
   const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [grades, setGrades] = useState<GradeItem[]>([]);
   const [filteredGrades, setFilteredGrades] = useState<GradeItem[]>([]);
+  const [stats, setStats] = useState<GradeStats | null>(null);
   const [filters, setFilters] = useState<GradeJournalFilters>({
     discipline: '',
     startDate: null,
@@ -109,8 +128,11 @@ const GradeJournal: React.FC = () => {
       try {
         setLoading(true);
         
-        // Загрузка дисциплин и аналитики
+        // Загрузка дисциплин и аналитики через эндпоинт analytics
         const analyticsResponse = await api.get('/grades/analytics');
+        
+        // Вывод в консоль для отладки
+        console.log('Данные из /grades/analytics:', analyticsResponse.data);
         
         // Извлекаем список дисциплин из ответа API
         let disciplinesList: Discipline[] = [];
@@ -136,9 +158,45 @@ const GradeJournal: React.FC = () => {
         
         setDisciplines(disciplinesList);
         
-        // Загрузка всех оценок студента
+        // Загрузка всех оценок студента через новый эндпоинт student с расширенным ответом
         const gradesResponse = await api.get('/grades/student');
-        const gradesData = gradesResponse.data || [];
+        const responseData = gradesResponse.data || {};
+        
+        // Вывод в консоль для отладки
+        console.log('Полученные данные из /grades/student:', responseData);
+        
+        // Обрабатываем новый формат ответа
+        let gradesData: GradeItem[] = [];
+        
+        if (Array.isArray(responseData)) {
+          // Для обратной совместимости со старым форматом ответа, когда ответ был массивом
+          console.log('Получен старый формат: массив оценок напрямую');
+          gradesData = responseData;
+        } 
+        else if (responseData.grades && Array.isArray(responseData.grades)) {
+          // Новый формат ответа с разделением на grades и stats
+          console.log('Получен новый формат: объект с полями grades и stats');
+          gradesData = responseData.grades;
+          setStats(responseData.stats || null);
+          
+          // Если получили дисциплины из статистики и еще не установили их ранее
+          if (responseData.stats && 
+              responseData.stats.disciplines && 
+              Array.isArray(responseData.stats.disciplines) && 
+              disciplinesList.length === 0) {
+            console.log('Устанавливаем дисциплины из объекта stats');
+            setDisciplines(responseData.stats.disciplines);
+          }
+        }
+        else {
+          // Неизвестный формат, используем пустой массив
+          console.warn('Неизвестный формат ответа от API, невозможно извлечь оценки');
+          gradesData = [];
+        }
+        
+        // Вывод в консоль для отладки
+        console.log('Статистика:', responseData.stats);
+        console.log('Оценки:', gradesData);
         
         setGrades(gradesData);
         setFilteredGrades(gradesData);
@@ -192,6 +250,11 @@ const GradeJournal: React.FC = () => {
     
     setFilteredGrades(result);
   }, [filters, grades]);
+  
+  // Проверка, применены ли какие-либо фильтры
+  const areFiltersApplied = (): boolean => {
+    return !!(filters.discipline || filters.gradeType || filters.startDate || filters.endDate);
+  };
   
   // Обработчики изменения фильтров
   const handleDisciplineChange = (event: SelectChangeEvent) => {
@@ -613,9 +676,11 @@ const GradeJournal: React.FC = () => {
                 border: '1px solid rgba(76, 175, 80, 0.2)'
               }}>
                 <Typography variant="h4" color="primary" fontWeight="bold">
-                  {filteredGrades.length > 0 ? 
-                    (filteredGrades.reduce((sum, grade) => sum + parseFloat(grade.value), 0) / filteredGrades.length).toFixed(2) : 
-                    '0.00'
+                  {!areFiltersApplied() && stats && stats.overall_average ? 
+                    stats.overall_average.toFixed(2) : 
+                    (filteredGrades.length > 0 ? 
+                      (filteredGrades.reduce((sum, grade) => sum + parseFloat(grade.value), 0) / filteredGrades.length).toFixed(2) : 
+                      '0.00')
                   }
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -633,10 +698,11 @@ const GradeJournal: React.FC = () => {
                 border: '1px solid rgba(255, 152, 0, 0.2)'
               }}>
                 <Typography variant="h4" color="primary" fontWeight="bold">
-                  {
-                    filteredGrades.filter(grade => parseFloat(grade.value) >= 4).length > 0 ?
+                  {!areFiltersApplied() && stats ? 
+                    `${calculateGoodGradePercentage(stats.distribution)}%` :
+                    (filteredGrades.filter(grade => parseFloat(grade.value) >= 4).length > 0 ?
                     `${((filteredGrades.filter(grade => parseFloat(grade.value) >= 4).length / filteredGrades.length) * 100).toFixed(0)}%` :
-                    '0%'
+                    '0%')
                   }
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
