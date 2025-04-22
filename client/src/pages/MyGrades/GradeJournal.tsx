@@ -43,63 +43,19 @@ import {
   Assessment
 } from '@mui/icons-material';
 import { format, parseISO, isValid } from 'date-fns';
-import { api } from '../../services/api';
 import { useLocation } from 'react-router-dom';
 
-// Интерфейсы для типизации данных
-interface Discipline {
-  id: string;
-  discipline_id: string;
-  discipline_name: string;
-  semester?: number;
-  average_grade?: number;
-}
-
-interface GradeItem {
-  id: string;
-  value: string;
-  discipline_id: string;
-  discipline_name: string;
-  date: string;
-  type: string;
-  description?: string;
-}
-
-interface GradeJournalFilters {
-  discipline: string;
-  startDate: Date | null;
-  endDate: Date | null;
-  gradeType: string;
-}
-
-// Интерфейс для статистики
-interface GradeStats {
-  overall_average: number;
-  distribution: { [key: string]: number };
-  type_averages: { [key: string]: number };
-  disciplines: any[];
-}
-
-// Вспомогательная функция для определения цвета оценки
-const getGradeColor = (grade: string | number): string => {
-  const numGrade = typeof grade === 'string' ? parseFloat(grade) : grade;
-  
-  if (numGrade >= 4.5) return '#4caf50';
-  if (numGrade >= 4.0) return '#8bc34a';
-  if (numGrade >= 3.0) return '#ffb74d';
-  if (numGrade >= 2.0) return '#ff9800';
-  return '#f44336';
-};
-
-// Функция для подсчета процента хороших и отличных оценок из распределения
-const calculateGoodGradePercentage = (distribution: { [key: string]: number }): number => {
-  const total = Object.values(distribution).reduce((sum, count) => sum + count, 0);
-  if (total === 0) return 0;
-  
-  // Хорошие оценки - 4 и 5
-  const goodGrades = (distribution['4'] || 0) + (distribution['5'] || 0);
-  return Math.round((goodGrades / total) * 100);
-};
+// Импорт утилит и сервисов
+import { 
+  GradeItem, 
+  Discipline, 
+  GradeJournalFilters, 
+  GradeStats,
+  getGradeColor,
+  calculateGoodGradePercentage 
+} from '../../utils/gradeUtils';
+import { GradesService } from '../../services/gradesService';
+import GradeIndicator from '../../components/grades/GradeIndicator';
 
 // Основной компонент страницы журнала оценок
 const GradeJournal: React.FC = () => {
@@ -128,82 +84,24 @@ const GradeJournal: React.FC = () => {
       try {
         setLoading(true);
         
-        // Загрузка дисциплин и аналитики через эндпоинт analytics
-        const analyticsResponse = await api.get('/grades/analytics');
+        // Использование сервиса для получения данных
+        const analytics = await GradesService.getAnalytics();
+        const studentData = await GradesService.getStudentGrades();
         
-        // Вывод в консоль для отладки
-        console.log('Данные из /grades/analytics:', analyticsResponse.data);
+        console.log('Данные аналитики:', analytics);
+        console.log('Данные студента:', studentData);
         
-        // Извлекаем список дисциплин из ответа API
-        let disciplinesList: Discipline[] = [];
-        const data = analyticsResponse.data;
+        // Установка дисциплин
+        setDisciplines(analytics.disciplines);
         
-        if (data.grades_by_discipline) {
-          disciplinesList = data.grades_by_discipline;
-        } else if (data.disciplines) {
-          disciplinesList = data.disciplines;
-        } else {
-          // Ищем массив с полем discipline_name
-          const possibleDisciplines = Object.values(data)
-            .filter(val => Array.isArray(val))
-            .find((val: any) => {
-              if (!Array.isArray(val) || val.length === 0) return false;
-              return typeof val[0] === 'object' && val[0] !== null && 'discipline_name' in val[0];
-            });
-              
-          if (possibleDisciplines) {
-            disciplinesList = possibleDisciplines as Discipline[];
-          }
-        }
-        
-        setDisciplines(disciplinesList);
-        
-        // Загрузка всех оценок студента через новый эндпоинт student с расширенным ответом
-        const gradesResponse = await api.get('/grades/student');
-        const responseData = gradesResponse.data || {};
-        
-        // Вывод в консоль для отладки
-        console.log('Полученные данные из /grades/student:', responseData);
-        
-        // Обрабатываем новый формат ответа
-        let gradesData: GradeItem[] = [];
-        
-        if (Array.isArray(responseData)) {
-          // Для обратной совместимости со старым форматом ответа, когда ответ был массивом
-          console.log('Получен старый формат: массив оценок напрямую');
-          gradesData = responseData;
-        } 
-        else if (responseData.grades && Array.isArray(responseData.grades)) {
-          // Новый формат ответа с разделением на grades и stats
-          console.log('Получен новый формат: объект с полями grades и stats');
-          gradesData = responseData.grades;
-          setStats(responseData.stats || null);
-          
-          // Если получили дисциплины из статистики и еще не установили их ранее
-          if (responseData.stats && 
-              responseData.stats.disciplines && 
-              Array.isArray(responseData.stats.disciplines) && 
-              disciplinesList.length === 0) {
-            console.log('Устанавливаем дисциплины из объекта stats');
-            setDisciplines(responseData.stats.disciplines);
-          }
-        }
-        else {
-          // Неизвестный формат, используем пустой массив
-          console.warn('Неизвестный формат ответа от API, невозможно извлечь оценки');
-          gradesData = [];
-        }
-        
-        // Вывод в консоль для отладки
-        console.log('Статистика:', responseData.stats);
-        console.log('Оценки:', gradesData);
-        
-        setGrades(gradesData);
-        setFilteredGrades(gradesData);
+        // Установка оценок и статистики
+        setGrades(studentData.grades);
+        setFilteredGrades(studentData.grades);
+        setStats(studentData.stats || analytics.stats);
         
         // Формируем уникальный список типов оценок
         const uniqueTypesObj: { [key: string]: boolean } = {};
-        gradesData.forEach((grade: GradeItem) => {
+        studentData.grades.forEach((grade: GradeItem) => {
           if (grade.type) {
             uniqueTypesObj[grade.type] = true;
           }
@@ -563,21 +461,7 @@ const GradeJournal: React.FC = () => {
                     <TableCell>{grade.type}</TableCell>
                     <TableCell>{isValid(new Date(grade.date)) ? format(parseISO(grade.date), 'dd.MM.yyyy') : 'Н/Д'}</TableCell>
                     <TableCell>
-                      <Box
-                        sx={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: 'bold',
-                          width: '36px',
-                          height: '36px',
-                          borderRadius: '50%',
-                          bgcolor: `${getGradeColor(grade.value)}20`,
-                          color: getGradeColor(grade.value)
-                        }}
-                      >
-                        {grade.value}
-                      </Box>
+                      <GradeIndicator value={grade.value} />
                     </TableCell>
                     <TableCell>{grade.description || '-'}</TableCell>
                   </TableRow>
