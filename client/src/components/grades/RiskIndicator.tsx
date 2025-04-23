@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, LinearProgress, Tooltip } from '@mui/material';
 import {
   CheckCircle,
   Shield,
@@ -12,6 +12,7 @@ interface RiskIndicatorProps {
   showPercentage?: boolean;
   showDescription?: boolean;
   showScale?: boolean;
+  size?: 'small' | 'medium' | 'large';
 }
 
 /**
@@ -21,7 +22,8 @@ const RiskIndicator: React.FC<RiskIndicatorProps> = ({
   probability,
   showPercentage = false,
   showDescription = true,
-  showScale = false
+  showScale = false,
+  size = 'medium'
 }) => {
   const { category, color } = getRiskCategory(probability);
   
@@ -60,44 +62,38 @@ const RiskIndicator: React.FC<RiskIndicatorProps> = ({
     }
   };
   
+  const icon = getIcon();
+  
   return (
-    <Box>
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center'
-      }}>
-        {getIcon()}
-        <Typography variant="subtitle1">Риск отчисления</Typography>
-      </Box>
-      
-      <Box sx={{ 
-        marginTop: '10px', 
-        padding: '8px', 
-        borderRadius: '4px', 
-        backgroundColor: 'rgba(0,0,0,0.05)',
-        display: 'flex',
-        alignItems: 'center'
-      }}>
-        <Typography 
-          variant="h5" 
-          sx={{ 
-            fontWeight: 'bold',
-            color: '#333',
-            marginRight: '10px'
-          }}
-        >
-          {category}
-        </Typography>
-        
-        {showPercentage && (
-          <Typography variant="body2" sx={{ color: '#666' }}>
-            {getRangeText()}
+    <Box sx={{ width: '100%' }}>
+      {showPercentage && (
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          mb: 1 
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {icon}
+            <Typography 
+              variant="body2" 
+              sx={{ 
+                ml: 0.5, 
+                fontWeight: 500,
+                color: 'rgba(0, 0, 0, 0.6)'
+              }}
+            >
+              {getRiskCategory(probability).category}
+            </Typography>
+          </Box>
+          <Typography variant="h5" fontWeight="bold" color="#333">
+            {Math.round(probability)}%
           </Typography>
-        )}
-      </Box>
+        </Box>
+      )}
       
       {showScale && (
-        <Box sx={{ marginTop: '15px' }}>
+        <Box sx={{ mt: 2, mb: 1 }}>
           <Box sx={{ 
             display: 'flex', 
             width: '100%', 
@@ -152,7 +148,15 @@ const RiskIndicator: React.FC<RiskIndicatorProps> = ({
       )}
       
       {showDescription && (
-        <Typography variant="caption" color="textSecondary" sx={{ marginTop: '8px', display: 'block' }}>
+        <Typography 
+          variant="caption" 
+          color="textSecondary" 
+          sx={{ 
+            mt: 1,
+            display: 'block',
+            fontSize: '0.75rem'
+          }}
+        >
           {getDescriptionText()}
         </Typography>
       )}

@@ -76,7 +76,14 @@ const TrendIndicator: React.FC<TrendIndicatorProps> = ({
           )}
           
           {showDescription && (
-            <Typography variant="caption" color="textSecondary">
+            <Typography 
+              variant="caption" 
+              color="textSecondary" 
+              sx={{ 
+                ml: 1,
+                fontSize: '0.75rem'
+              }}
+            >
               {getTrendDescription()}
             </Typography>
           )}

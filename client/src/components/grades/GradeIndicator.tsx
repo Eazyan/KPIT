@@ -23,7 +23,7 @@ const GradeIndicator: React.FC<GradeIndicatorProps> = ({
   const getSizeValues = () => {
     switch (size) {
       case 'small':
-        return { width: '28px', height: '28px', fontSize: '0.875rem' };
+        return { width: '28px', height: '28px', fontSize: '0.75rem' };
       case 'large':
         return { width: '48px', height: '48px', fontSize: '1.25rem' };
       case 'medium':
@@ -44,12 +44,13 @@ const GradeIndicator: React.FC<GradeIndicatorProps> = ({
         width,
         height,
         borderRadius: '50%',
-        bgcolor: `${color}20`,
-        color: color
+        backgroundColor: color,
+        color: 'white',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
       }}
     >
       {showValue && (
-        <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize }}>
+        <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize, color: 'inherit' }}>
           {typeof value === 'number' ? value.toFixed(1) : value}
         </Typography>
       )}

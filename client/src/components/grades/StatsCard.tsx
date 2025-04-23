@@ -48,29 +48,31 @@ const StatsCard: React.FC<StatsCardProps> = ({
       <Box sx={{ 
         display: 'flex', 
         alignItems: 'center', 
-        marginBottom: '10px'
+        marginBottom: '12px'
       }}>
-        <Box sx={{ color: iconColor, marginRight: '8px' }}>
+        <Box sx={{ color: iconColor, marginRight: '10px' }}>
           {icon}
         </Box>
-        <Typography variant="subtitle1">{title}</Typography>
+        <Typography variant="subtitle1" fontWeight="medium">{title}</Typography>
       </Box>
       
-      <Typography 
-        variant="h4" 
-        sx={{ 
-          fontWeight: 'bold', 
-          margin: '10px 0',
-          color: '#333'
-        }}
-      >
-        {value}
-        {subtitle && (
-          <Typography variant="caption" sx={{ marginLeft: '8px', fontWeight: 'normal' }}>
-            {subtitle}
-          </Typography>
-        )}
-      </Typography>
+      {value && (
+        <Typography 
+          variant="h4" 
+          sx={{ 
+            fontWeight: 'bold', 
+            margin: '10px 0',
+            color: '#333'
+          }}
+        >
+          {value}
+          {subtitle && (
+            <Typography variant="caption" sx={{ marginLeft: '8px', fontWeight: 'normal' }}>
+              {subtitle}
+            </Typography>
+          )}
+        </Typography>
+      )}
       
       {progress !== undefined && (
         <Box sx={{ my: 1 }}>
@@ -83,12 +85,14 @@ const StatsCard: React.FC<StatsCardProps> = ({
       )}
       
       {trend && (
-        <Box sx={{ mt: 'auto', pt: 1 }}>
+        <Box sx={{ mt: 1, pt: 1 }}>
           {trend}
         </Box>
       )}
       
-      {children}
+      <Box sx={{ mt: value ? 1 : 0 }}>
+        {children}
+      </Box>
     </Box>
   );
 };

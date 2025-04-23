@@ -61,8 +61,7 @@ export const getGradeColor = (grade: string | number): string => {
   if (numGrade >= 4.5) return '#4caf50';
   if (numGrade >= 4.0) return '#8bc34a';
   if (numGrade >= 3.0) return '#ffb74d';
-  if (numGrade >= 2.0) return '#ff9800';
-  return '#f44336';
+  return '#f44336'; // Красный цвет для оценок 2 и ниже
 };
 
 /**
