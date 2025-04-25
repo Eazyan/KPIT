@@ -15,6 +15,21 @@ services:
     networks:
       - kpius-network
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: kpius-rabbitmq
+    ports:
+      - "5672:5672"  # AMQP порт
+      - "15672:15672"  # Порт веб-интерфейса управления
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
   # FastAPI сервер
   api:
     build:
@@ -29,8 +44,10 @@ services:
       - JWT_SECRET=YOUR_SECRET_KEY
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
       - ALGORITHM=HS256
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
     depends_on:
       - mongodb
+      - rabbitmq
     restart: unless-stopped
     networks:
       - kpius-network
@@ -57,6 +74,7 @@ services:
 
 volumes:
   mongodb_data:
+  rabbitmq_data:
 
 networks:
   kpius-network:

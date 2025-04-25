@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 # Импортируем нужные модули, включая grades
 from .api.routes import auth, attendance, grades
+from .api.endpoints import messages
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -43,6 +44,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Аутентификация"])
 app.include_router(attendance.router, prefix="/api/attendance", tags=["Посещаемость"])
 app.include_router(grades.router, prefix="/api/grades", tags=["Успеваемость"])
+app.include_router(messages.router, prefix="/api/messages", tags=["Сообщения"])
 
 # Пользовательский путь к API документации
 @app.get("/api/docs", include_in_schema=False)
