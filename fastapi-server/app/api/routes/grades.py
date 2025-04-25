@@ -3,6 +3,8 @@ import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from bson import ObjectId
+from inspect import iscoroutinefunction
+from motor.motor_asyncio import AsyncIOMotorClient
 
 from ...models.grades import GradeCreate, GradeResponse, GradeAnalytics, StudentGradeSummary
 from ...middlewares.auth import get_current_active_user, check_roles
@@ -15,6 +17,64 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Роут для добавления оценки (принимает параметры в теле запроса)
+@router.post("/", status_code=status.HTTP_201_CREATED)
+async def add_grade_json(
+    grade_data: Dict[str, Any] = Body(...),
+    current_user: TokenData = Depends(get_current_active_user),
+):
+    try:
+        # Проверяем роль пользователя
+        if current_user.role not in [UserRole.TEACHER, UserRole.ADMIN]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только преподаватели и администраторы могут добавлять оценки",
+            )
+            
+        student_id = grade_data.get("student_id")
+        discipline_id = grade_data.get("discipline_id")
+        grade_value = grade_data.get("grade_value")
+        grade_type = grade_data.get("grade_type")
+        description = grade_data.get("description", "")
+        weight = grade_data.get("weight", 1.0)
+        date = grade_data.get("date")
+            
+        logger.info(f"Попытка добавления оценки через JSON: дисциплина={discipline_id}, студент={student_id}, значение={grade_value}")
+        
+        # Проверяем обязательные поля
+        if not all([student_id, discipline_id, grade_value, grade_type]):
+            raise ValueError("Не указаны обязательные поля: student_id, discipline_id, grade_value, grade_type")
+            
+        try:
+            # Используем сервисный слой для добавления оценки
+            result = await GradeService.add_grade(
+                student_id=student_id,
+                discipline_id=discipline_id,
+                grade_value=int(grade_value),
+                grade_type=grade_type,
+                description=description,
+                weight=float(weight),
+                date=date,
+                created_by=current_user.id
+            )
+            return result
+        except ValueError as e:
+            # Преобразуем ошибки валидации в HTTP исключения
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+    
+    except HTTPException as e:
+        logger.error(f"Ошибка при добавлении оценки через JSON: {e.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Непредвиденная ошибка при добавлении оценки через JSON: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при добавлении оценки: {str(e)}",
+        )
+
 # Роут для добавления оценки
 @router.post("/add", status_code=status.HTTP_201_CREATED)
 async def add_grade(
@@ -25,11 +85,11 @@ async def add_grade(
     description: Optional[str] = None,
     weight: float = 1.0,
     date: Optional[str] = None,
-    current_user: UserInDB = Depends(get_current_active_user),
+    current_user: TokenData = Depends(get_current_active_user),
 ):
     try:
         # Проверяем роль пользователя
-        if current_user["role"] not in [UserRole.TEACHER, UserRole.ADMIN]:
+        if current_user.role not in [UserRole.TEACHER, UserRole.ADMIN]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Только преподаватели и администраторы могут добавлять оценки",
@@ -47,7 +107,7 @@ async def add_grade(
                 description=description,
                 weight=weight,
                 date=date,
-                created_by=str(current_user["_id"])
+                created_by=current_user.id
             )
             return result
         except ValueError as e:
@@ -79,8 +139,9 @@ async def get_student_grades(current_user: TokenData = Depends(get_current_activ
         # Получаем аналитику, которая содержит и статистику, и недавние оценки
         analytics = await GradeAnalyticsService.get_student_grade_analytics(user_id)
         
-        # Находим все оценки для данного студента (синхронный вызов)
-        grades = list(grades_collection.find({"student_id": user_id}))
+        # Находим все оценки для данного студента (асинхронный вызов)
+        cursor = grades_collection.find({"student_id": user_id})
+        grades = await cursor.to_list(length=100)
         
         # Преобразуем ObjectId в строки и обеспечиваем совместимость с GradeJournal
         for grade in grades:
@@ -93,16 +154,19 @@ async def get_student_grades(current_user: TokenData = Depends(get_current_activ
             
             # Проверим, есть ли discipline_name, если нет - получим его
             if "discipline_id" in grade and "discipline_name" not in grade:
-                # Используем синхронную версию find_one
-                discipline = disciplines_collection.find_one({"_id": ObjectId(grade["discipline_id"])})
+                # Используем асинхронную версию find_one
+                discipline = await disciplines_collection.find_one({"_id": ObjectId(grade["discipline_id"])})
                 if discipline:
                     grade["discipline_name"] = discipline.get("name", "Неизвестная дисциплина")
                 else:
                     grade["discipline_name"] = "Неизвестная дисциплина"
             
             # Форматируем дату если она в неправильном формате
-            if "date" in grade and not isinstance(grade["date"], str):
-                grade["date"] = grade["date"].strftime("%Y-%m-%d")
+            if "date" in grade:
+                if hasattr(grade["date"], "strftime"):
+                    grade["date"] = grade["date"].strftime("%Y-%m-%d")
+                elif not isinstance(grade["date"], str):
+                    grade["date"] = str(grade["date"])
         
         # Создаем результирующий объект, содержащий и оценки, и статистику
         result = {
@@ -129,14 +193,14 @@ async def get_student_grades(current_user: TokenData = Depends(get_current_activ
 async def get_student_grades_by_discipline(
     discipline_id: str,
     student_id: Optional[str] = None,
-    current_user: UserInDB = Depends(get_current_active_user),
+    current_user: TokenData = Depends(get_current_active_user),
 ):
     try:
         # Если student_id не указан, используем ID текущего пользователя
-        target_student_id = student_id if student_id else str(current_user["_id"])
+        target_student_id = student_id if student_id else current_user.id
         
         # Проверяем права доступа
-        if student_id and current_user["role"] == UserRole.STUDENT and str(current_user["_id"]) != student_id:
+        if student_id and current_user.role == UserRole.STUDENT and current_user.id != student_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Студент может просматривать только свои оценки",
@@ -165,14 +229,14 @@ async def get_student_grades_by_discipline(
 @router.get("/summary", response_model=Dict[str, Any])
 async def get_student_grade_summary(
     student_id: Optional[str] = None,
-    current_user: UserInDB = Depends(get_current_active_user),
+    current_user: TokenData = Depends(get_current_active_user),
 ):
     try:
         # Если student_id не указан, используем ID текущего пользователя
-        target_student_id = student_id if student_id else str(current_user["_id"])
+        target_student_id = student_id if student_id else current_user.id
         
         # Проверяем права доступа
-        if student_id and current_user["role"] == UserRole.STUDENT and str(current_user["_id"]) != student_id:
+        if student_id and current_user.role == UserRole.STUDENT and current_user.id != student_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Студент может просматривать только свою сводку оценок",
@@ -392,22 +456,36 @@ async def get_all_discipline_grades(
                 )
             
             # Проверяем доступ преподавателя к дисциплине
-            teacher_disciplines = teacher.get("disciplines", [])
-            if discipline_id not in teacher_disciplines:
-                logger.warning(
-                    f"Преподаватель {user_id} пытается получить доступ "
-                    f"к оценкам дисциплины {discipline_id}, которую он не ведет"
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Доступ запрещен. Вы не ведете эту дисциплину.",
-                )
+            # Проверяем в коллекции дисциплин, является ли преподаватель владельцем дисциплины
+            discipline = await disciplines_collection.find_one({
+                "_id": ObjectId(discipline_id),
+                "teacher": ObjectId(user_id)
+            })
+            
+            if not discipline:
+                # Проверяем в списке дисциплин преподавателя (альтернативный способ назначения)
+                teacher_disciplines = teacher.get("disciplines", [])
+                if discipline_id not in teacher_disciplines:
+                    logger.warning(
+                        f"Преподаватель {user_id} пытается получить доступ "
+                        f"к оценкам дисциплины {discipline_id}, которую он не ведет"
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Доступ запрещен. Вы не ведете эту дисциплину.",
+                    )
+                else:
+                    logger.info(f"Преподаватель {user_id} имеет доступ к дисциплине {discipline_id} через список дисциплин")
+            else:
+                logger.info(f"Преподаватель {user_id} является владельцем дисциплины {discipline_id}")
 
         logger.info(f"Получение всех оценок по дисциплине {discipline_id} пользователем {user_id}")
         
         # Получаем все оценки по дисциплине через сервисный слой
         try:
+            # Исправленный код - всегда используем асинхронный вызов
             grades = await GradeService.get_discipline_grades(discipline_id)
+                
             logger.info(f"Успешно получены {len(grades)} оценок по дисциплине {discipline_id}")
             return grades
         except ValueError as e:
@@ -425,4 +503,82 @@ async def get_all_discipline_grades(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Внутренняя ошибка сервера при получении оценок",
+        )
+
+# Роут для удаления оценки
+@router.delete("/{grade_id}", status_code=status.HTTP_200_OK)
+async def delete_grade(
+    grade_id: str,
+    current_user: TokenData = Depends(get_current_active_user)
+):
+    """
+    Удаление конкретной оценки по ее ID
+    """
+    try:
+        # Проверяем, что текущий пользователь - преподаватель или администратор
+        if current_user.role not in [UserRole.TEACHER, UserRole.ADMIN]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="У вас нет прав для выполнения этой операции"
+            )
+        
+        # Преобразуем ID оценки в ObjectId
+        try:
+            grade_oid = ObjectId(grade_id)
+        except:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Некорректный формат ID оценки"
+            )
+        
+        # Получаем оценку, чтобы проверить доступ преподавателя
+        grade = await grades_collection.find_one({"_id": grade_oid})
+        
+        if not grade:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Оценка не найдена"
+            )
+        
+        # Проверяем, имеет ли преподаватель доступ к этой дисциплине
+        if current_user.role == UserRole.TEACHER:
+            discipline_id = grade.get("discipline_id")
+            teacher_id = current_user.id
+            
+            # Проверяем, ведет ли преподаватель эту дисциплину
+            discipline = await disciplines_collection.find_one({
+                "_id": ObjectId(discipline_id),
+                "teacher": ObjectId(teacher_id)
+            })
+            
+            if not discipline:
+                # Альтернативная проверка по списку дисциплин преподавателя
+                teacher = await users_collection.find_one({"_id": ObjectId(teacher_id)})
+                teacher_disciplines = teacher.get("disciplines", [])
+                
+                if discipline_id not in teacher_disciplines:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Вы не имеете доступа к этой дисциплине"
+                    )
+        
+        # Удаляем оценку
+        result = await grades_collection.delete_one({"_id": grade_oid})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Оценка не найдена или уже удалена"
+            )
+        
+        return {"message": "Оценка успешно удалена", "deleted_count": result.deleted_count}
+        
+    except HTTPException:
+        # Пробрасываем HTTP исключения дальше
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при удалении оценки {grade_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Внутренняя ошибка сервера при удалении оценки: {str(e)}"
         ) 

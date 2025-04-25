@@ -1,4 +1,4 @@
-from pymongo import MongoClient
+from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.database import Database
 import os
 from dotenv import load_dotenv
@@ -10,9 +10,9 @@ load_dotenv()
 MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "kpiusdb")
 
-# Создание подключения к MongoDB
-client = MongoClient(MONGODB_URL)
-db: Database = client[DATABASE_NAME]
+# Создание асинхронного подключения к MongoDB
+client = AsyncIOMotorClient(MONGODB_URL)
+db = client[DATABASE_NAME]
 
 # Коллекции базы данных
 users_collection = db.users

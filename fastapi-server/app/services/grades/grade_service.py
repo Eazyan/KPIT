@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from bson import ObjectId
+from fastapi import HTTPException, status
 
 from ...core.database import db, users_collection, disciplines_collection
 from ...models.user import UserRole
@@ -66,7 +67,7 @@ class GradeService:
             raise ValueError("Оценка должна быть в диапазоне от 1 до 5")
         
         # Проверяем тип оценки
-        valid_types = ["exam", "test", "homework", "project", "activity"]
+        valid_types = ["exam", "test", "homework", "project", "activity", "lab"]
         if grade_type not in valid_types:
             raise ValueError(f"Неверный тип оценки. Допустимые типы: {', '.join(valid_types)}")
         
@@ -76,7 +77,12 @@ class GradeService:
             try:
                 grade_date = datetime.fromisoformat(date)
             except ValueError:
-                raise ValueError("Неверный формат даты. Используйте формат ISO (YYYY-MM-DDTHH:MM:SS)")
+                # Пробуем другие форматы даты
+                try:
+                    # Пробуем формат YYYY-MM-DD
+                    grade_date = datetime.strptime(date, "%Y-%m-%d")
+                except ValueError:
+                    raise ValueError("Неверный формат даты. Используйте формат ISO (YYYY-MM-DD)")
         else:
             grade_date = datetime.utcnow()
         
@@ -93,10 +99,40 @@ class GradeService:
             "created_by": created_by
         }
         
+        # Добавляем новую оценку
         result = await grades_collection.insert_one(grade)
         
+        # Убедимся, что студент принадлежит к группе, которая изучает эту дисциплину
+        # Это поможет при отображении оценок на стороне студента
+        student_group = student.get("group")
+        if student_group:
+            # Проверяем, есть ли связь между группой и дисциплиной
+            group_discipline = await db.group_disciplines.find_one({
+                "group_id": student_group,
+                "discipline_id": discipline_id
+            })
+            
+            # Если связи нет, создаем её
+            if not group_discipline:
+                try:
+                    await db.group_disciplines.insert_one({
+                        "group_id": student_group,
+                        "discipline_id": discipline_id,
+                        "created_at": datetime.utcnow()
+                    })
+                    logger.info(f"Создана связь между группой {student_group} и дисциплиной {discipline_id}")
+                except Exception as e:
+                    logger.warning(f"Не удалось создать связь группа-дисциплина: {str(e)}")
+        
         logger.info(f"Оценка успешно добавлена: {result.inserted_id}")
-        return {"id": str(result.inserted_id), "message": "Оценка успешно добавлена"}
+        
+        # Возвращаем более подробную информацию об успешном добавлении
+        return {
+            "id": str(result.inserted_id),
+            "value": grade_value,
+            "type": grade_type,
+            "message": "Оценка успешно добавлена"
+        }
     
     @staticmethod
     async def get_student_grades(student_id: str) -> List[Dict[str, Any]]:
@@ -109,7 +145,7 @@ class GradeService:
         Returns:
             List[Dict]: Список оценок с информацией о дисциплинах
         """
-        logger.info(f"Получение оценок для студента: {student_id}")
+        logger.info(f"Получение всех оценок для студента: {student_id}")
         
         # Получаем все оценки для студента
         cursor = grades_collection.find({"student_id": student_id})
@@ -120,69 +156,162 @@ class GradeService:
         for grade in grades:
             grade["_id"] = str(grade["_id"])
             
-            # Получаем название дисциплины
+            # Получаем информацию о дисциплине
             discipline = await disciplines_collection.find_one({"_id": ObjectId(grade["discipline_id"])})
             if discipline:
-                grade["discipline_name"] = discipline["name"]
+                grade["discipline_name"] = discipline.get("name", "Неизвестная дисциплина")
+                grade["discipline_id"] = str(discipline["_id"])
+            
+            # Получаем информацию о преподавателе
+            if "teacher_id" in grade:
+                teacher = await users_collection.find_one({"_id": ObjectId(grade["teacher_id"])})
+                if teacher:
+                    grade["teacher_name"] = f"{teacher.get('last_name', '')} {teacher.get('first_name', '')}".strip()
+                    if not grade["teacher_name"].strip():
+                        grade["teacher_name"] = teacher.get("name", "Неизвестный преподаватель")
             
             # Конвертируем дату в строку ISO
             if "date" in grade:
-                grade["date"] = grade["date"].isoformat()
+                # Проверяем тип даты и корректно форматируем
+                if hasattr(grade["date"], "isoformat"):
+                    # Если это объект datetime
+                    grade["date"] = grade["date"].isoformat()
+                elif isinstance(grade["date"], str):
+                    # Если уже строка, оставляем как есть
+                    pass
+                else:
+                    # Для других типов, конвертируем в строку
+                    grade["date"] = str(grade["date"])
             
             result.append(grade)
         
-        # Сортируем по дате (сначала новые)
-        result.sort(key=lambda x: x.get("date", ""), reverse=True)
+        # Сортируем по дате и названию дисциплины
+        result.sort(key=lambda x: (x.get("date", ""), x.get("discipline_name", "")), reverse=True)
         
         logger.info(f"Найдено {len(result)} оценок для студента {student_id}")
         return result
     
     @staticmethod
-    async def get_student_grades_by_discipline(student_id: str, discipline_id: str) -> List[Dict[str, Any]]:
+    async def get_student_grades_by_discipline(
+        student_id: str, 
+        discipline_id: str, 
+        from_date: Optional[str] = None, 
+        to_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Получение оценок студента по конкретной дисциплине
+        Получение всех оценок студента по конкретной дисциплине
         
         Args:
             student_id: ID студента
             discipline_id: ID дисциплины
+            from_date: Начальная дата в формате YYYY-MM-DD
+            to_date: Конечная дата в формате YYYY-MM-DD
             
         Returns:
-            List[Dict]: Список оценок по указанной дисциплине
-            
-        Raises:
-            ValueError: Если дисциплина не найдена
+            List[Dict]: Список оценок
         """
-        # Проверяем существование дисциплины
-        discipline = await disciplines_collection.find_one({"_id": ObjectId(discipline_id)})
-        if not discipline:
-            raise ValueError(f"Дисциплина с ID {discipline_id} не найдена")
+        pipeline = [
+            {
+                "$match": {
+                    "student_id": student_id,
+                    "discipline_id": discipline_id
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "disciplines",
+                    "localField": "discipline_id",
+                    "foreignField": "_id",
+                    "as": "discipline"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$discipline",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "users",
+                    "localField": "created_by",
+                    "foreignField": "_id",
+                    "as": "teacher"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$teacher",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$sort": {"date": -1}
+            }
+        ]
         
-        logger.info(f"Получение оценок для студента {student_id} по дисциплине {discipline_id}")
+        # Добавляем фильтр по дате, если указан
+        if from_date or to_date:
+            date_filter = {}
+            if from_date:
+                try:
+                    from_datetime = datetime.fromisoformat(from_date)
+                except ValueError:
+                    from_datetime = datetime.strptime(from_date, "%Y-%m-%d")
+                date_filter["$gte"] = from_datetime
+                
+            if to_date:
+                try:
+                    to_datetime = datetime.fromisoformat(to_date)
+                except ValueError:
+                    to_datetime = datetime.strptime(to_date, "%Y-%m-%d")
+                date_filter["$lte"] = to_datetime
+                
+            # Обновляем условие в pipeline
+            if date_filter:
+                pipeline[0]["$match"]["date"] = date_filter
         
-        # Получаем оценки по дисциплине
-        cursor = grades_collection.find({
-            "student_id": student_id,
-            "discipline_id": discipline_id
-        })
-        grades = await cursor.to_list(length=100)
+        # Выполняем агрегацию
+        cursor = await grades_collection.aggregate(pipeline)
         
-        # Форматируем результат
-        result = []
-        for grade in grades:
-            grade["_id"] = str(grade["_id"])
-            grade["discipline_name"] = discipline["name"]
+        grades = []
+        async for grade in cursor:
+            # Преобразуем _id в строку
+            grade["id"] = str(grade["_id"])
+            del grade["_id"]
             
-            # Конвертируем дату в строку ISO
-            if "date" in grade:
-                grade["date"] = grade["date"].isoformat()
+            # Если дисциплина найдена, заменяем discipline_id на объект с названием
+            if grade.get("discipline"):
+                grade["discipline"] = {
+                    "id": str(grade["discipline"]["_id"]),
+                    "name": grade["discipline"].get("name", "Неизвестная дисциплина")
+                }
             
-            result.append(grade)
+            # Если преподаватель найден, заменяем created_by на объект с именем
+            if grade.get("teacher"):
+                grade["teacher"] = {
+                    "id": str(grade["teacher"]["_id"]),
+                    "name": f"{grade['teacher'].get('last_name', '')} {grade['teacher'].get('first_name', '')}".strip()
+                }
+            
+            # Преобразуем даты в ISO формат
+            if grade.get("date"):
+                date = grade["date"]
+                if hasattr(date, "isoformat"):
+                    grade["date"] = date.isoformat()
+                elif not isinstance(date, str):
+                    grade["date"] = str(date)
+            
+            if grade.get("created_at"):
+                created_at = grade["created_at"]
+                if hasattr(created_at, "isoformat"):
+                    grade["created_at"] = created_at.isoformat()
+                elif not isinstance(created_at, str):
+                    grade["created_at"] = str(created_at)
+            
+            grades.append(grade)
         
-        # Сортируем по дате (сначала новые)
-        result.sort(key=lambda x: x.get("date", ""), reverse=True)
-        
-        logger.info(f"Найдено {len(result)} оценок для студента {student_id} по дисциплине {discipline_id}")
-        return result
+        return grades
     
     @staticmethod
     async def get_student_grade_summary(student_id: str) -> Dict[str, Any]:
@@ -309,12 +438,23 @@ class GradeService:
             student = await users_collection.find_one({"_id": ObjectId(grade["student_id"])})
             if student:
                 grade["student_name"] = f"{student.get('last_name', '')} {student.get('first_name', '')} {student.get('middle_name', '')}".strip()
+                if not grade["student_name"].strip():
+                    grade["student_name"] = student.get("name", "Неизвестный студент")
                 grade["student_email"] = student.get("email", "")
                 grade["student_group"] = student.get("group", "")
             
             # Конвертируем дату в строку ISO
             if "date" in grade:
-                grade["date"] = grade["date"].isoformat()
+                # Проверяем тип даты и корректно форматируем
+                if hasattr(grade["date"], "isoformat"):
+                    # Если это объект datetime
+                    grade["date"] = grade["date"].isoformat()
+                elif isinstance(grade["date"], str):
+                    # Если уже строка, оставляем как есть
+                    pass
+                else:
+                    # Для других типов, конвертируем в строку
+                    grade["date"] = str(grade["date"])
             
             result.append(grade)
         
@@ -322,4 +462,65 @@ class GradeService:
         result.sort(key=lambda x: (x.get("date", ""), x.get("student_name", "")), reverse=True)
         
         logger.info(f"Найдено {len(result)} оценок по дисциплине {discipline_id}")
-        return result 
+        return result
+    
+    @staticmethod
+    async def get_discipline_grade_stats(student_id: str, discipline_id: str):
+        """
+        Получение статистики по оценкам студента по конкретной дисциплине
+        """
+        try:
+            # Получаем все оценки студента по дисциплине
+            cursor = grades_collection.find({
+                "student_id": student_id,
+                "discipline_id": discipline_id
+            })
+            grades = await cursor.to_list(length=100)
+            
+            if not grades:
+                return {
+                    "average": 0,
+                    "count": 0,
+                    "max": 0,
+                    "min": 0,
+                    "grade_counts": {}
+                }
+            
+            # Считаем статистику
+            values = [grade["value"] for grade in grades if "value" in grade]
+            
+            if not values:
+                return {
+                    "average": 0,
+                    "count": 0,
+                    "max": 0,
+                    "min": 0,
+                    "grade_counts": {}
+                }
+            
+            # Считаем количество каждой оценки
+            grade_counts = {}
+            for value in values:
+                value_str = str(value)
+                if value_str in grade_counts:
+                    grade_counts[value_str] += 1
+                else:
+                    grade_counts[value_str] = 1
+            
+            return {
+                "average": sum(values) / len(values),
+                "count": len(values),
+                "max": max(values),
+                "min": min(values),
+                "grade_counts": grade_counts
+            }
+        except Exception as e:
+            logger.error(f"Ошибка при расчете статистики по оценкам: {str(e)}")
+            return {
+                "average": 0,
+                "count": 0,
+                "max": 0,
+                "min": 0,
+                "grade_counts": {},
+                "error": str(e)
+            } 

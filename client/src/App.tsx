@@ -12,6 +12,7 @@ import StudentAttendance from './pages/Attendance/StudentAttendance';
 import AdminAttendance from './pages/Attendance/AdminAttendance';
 import MyGrades from './pages/MyGrades/index';
 import GradeJournal from './pages/MyGrades/GradeJournal';
+import TeacherGrades from './pages/Grades';
 import Layout from './components/Layout/Layout';
 import './App.css';
 
@@ -44,6 +45,9 @@ function App() {
             {/* Маршрут для страницы оценок */}
             <Route path="/grades" element={<Layout><MyGrades /></Layout>} />
             <Route path="/grades/journal" element={<Layout><GradeJournal /></Layout>} />
+            
+            {/* Маршрут для страницы оценок преподавателя */}
+            <Route path="/teacher/grades" element={<Layout><TeacherGrades /></Layout>} />
             
             {/* Устаревшие маршруты для обратной совместимости */}
             <Route path="/attendance" element={<Layout><TeacherAttendance /></Layout>} />

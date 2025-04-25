@@ -56,7 +56,7 @@ class GradeAnalyticsService:
     @staticmethod
     async def calculate_expulsion_probability(student_id: str) -> Dict[str, Any]:
         """
-        Расчет вероятности отчисления студента на основе его оценок и активности
+        Расчет вероятности отчисления студента по его оценкам и посещаемости
         
         Args:
             student_id: ID студента
@@ -69,7 +69,8 @@ class GradeAnalyticsService:
         # Получаем оценки студента
         try:
             student_id_obj = ObjectId(student_id)
-            grades = list(grades_collection.find({"student_id": student_id_obj}))
+            cursor = grades_collection.find({"student_id": student_id_obj})
+            grades = await cursor.to_list(length=100)
             logger.debug(f"Получено {len(grades)} оценок для анализа риска отчисления")
         except Exception as e:
             logger.error(f"Ошибка при получении оценок для анализа риска отчисления: {str(e)}")
@@ -86,7 +87,8 @@ class GradeAnalyticsService:
             }
         
         # Получаем посещаемость студента
-        attendance_records = list(db.attendance.find({"student_id": student_id}))
+        cursor = db.attendance.find({"student_id": student_id})
+        attendance_records = await cursor.to_list(length=100)
         
         # Расчет среднего балла
         average_grade = sum(grade["value"] for grade in grades) / len(grades)
@@ -209,8 +211,9 @@ class GradeAnalyticsService:
         # Преобразуем строковый ID в ObjectId для корректного поиска в MongoDB
         try:
             student_id_obj = ObjectId(student_id)
-            # Используем синхронный метод find с list для преобразования курсора в список
-            grades = list(grades_collection.find({"student_id": student_id_obj}))
+            # Используем асинхронный запрос
+            cursor = grades_collection.find({"student_id": student_id_obj})
+            grades = await cursor.to_list(length=100)
             logger.debug(f"Получено {len(grades)} оценок")
         except Exception as e:
             logger.error(f"Ошибка при поиске оценок студента {student_id}: {str(e)}")
@@ -253,14 +256,19 @@ class GradeAnalyticsService:
         disciplines_data = {}
         for discipline_id in discipline_ids:
             try:
-                # Здесь также используем синхронный вариант
-                discipline = disciplines_collection.find_one({"_id": ObjectId(discipline_id)})
+                # Используем асинхронный запрос
+                discipline = await disciplines_collection.find_one({"_id": ObjectId(discipline_id)})
                 if discipline:
                     disciplines_data[discipline_id] = {
                         "id": discipline_id,
                         "name": discipline.get("name", "Неизвестная дисциплина")
                     }
                     logger.debug(f"Найдена дисциплина: {discipline.get('name', 'Неизвестная')}")
+                else:
+                    disciplines_data[discipline_id] = {
+                        "id": discipline_id,
+                        "name": "Неизвестная дисциплина"
+                    }
             except Exception as e:
                 logger.error(f"Ошибка при получении дисциплины {discipline_id}: {str(e)}")
                 # Продолжаем работу с другими дисциплинами
@@ -328,12 +336,17 @@ class GradeAnalyticsService:
             if grade["discipline_id"] in disciplines_data:
                 discipline_name = disciplines_data[grade["discipline_id"]]["name"]
             
+            # Форматируем дату в ISO формат
+            date_str = grade["date"]
+            if hasattr(grade["date"], "isoformat"):
+                date_str = grade["date"].isoformat()
+            
             recent_grades.append({
                 "id": grade["id"],
                 "value": grade["value"],
                 "type": grade["type"],
                 "discipline_name": discipline_name,
-                "date": grade["date"].isoformat(),
+                "date": date_str,
                 "description": grade["description"]
             })
         
@@ -352,4 +365,34 @@ class GradeAnalyticsService:
         
         logger.info(f"Аналитика сформирована для студента {student_id}")
         # Преобразуем все ObjectId в строки перед возвращением
-        return GradeAnalyticsService.convert_objectid(result) 
+        return GradeAnalyticsService.convert_objectid(result)
+        
+    @staticmethod
+    async def get_discipline_analytics(discipline_id: str) -> Dict[str, Any]:
+        """
+        Получение аналитики по дисциплине для всех студентов
+        
+        Args:
+            discipline_id: ID дисциплины
+            
+        Returns:
+            Dict: Аналитика по дисциплине
+        """
+        # Получаем все оценки по дисциплине
+        try:
+            discipline_id_obj = ObjectId(discipline_id)
+        except:
+            discipline_id_obj = discipline_id
+            
+        cursor = grades_collection.find({"discipline_id": discipline_id_obj})
+        grades = await cursor.to_list(length=100)
+        
+        if not grades and isinstance(discipline_id_obj, ObjectId):
+            # Пробуем со строковым ID
+            cursor = grades_collection.find({"discipline_id": discipline_id})
+            grades = await cursor.to_list(length=100)
+        
+        # Дальнейшая обработка аналитики...
+        # ...
+        
+        return {"message": "Аналитика в разработке"} 

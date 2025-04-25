@@ -298,6 +298,10 @@ export const gradesAPI = {
     const response = await api.get(`/grades/discipline/${disciplineId}`);
     return response.data;
   },
+  getAllByDiscipline: async (disciplineId: string) => {
+    const response = await api.get(`/grades/discipline/${disciplineId}/all`);
+    return response.data;
+  },
   getByStudent: async (studentId: string) => {
     const response = await api.get(`/grades/student/${studentId}`);
     return response.data;

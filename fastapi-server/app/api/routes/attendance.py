@@ -31,7 +31,8 @@ async def get_teacher_groups(
     Получение списка групп, в которых преподает преподаватель
     """
     # Находим дисциплины, которые ведет преподаватель
-    disciplines = list(disciplines_collection.find({"teacher": ObjectId(current_user.id)}))
+    cursor = disciplines_collection.find({"teacher": ObjectId(current_user.id)})
+    disciplines = await cursor.to_list(length=100)
     
     # Собираем уникальные идентификаторы групп
     group_ids = set()
@@ -41,7 +42,7 @@ async def get_teacher_groups(
     # Получаем информацию о группах
     groups = []
     for group_id in group_ids:
-        group = groups_collection.find_one({"_id": group_id})
+        group = await groups_collection.find_one({"_id": group_id})
         if group:
             groups.append({
                 "id": str(group["_id"]),
@@ -72,10 +73,11 @@ async def get_group_disciplines(
         )
     
     # Находим дисциплины, которые ведет преподаватель в этой группе
-    disciplines = list(disciplines_collection.find({
+    cursor = disciplines_collection.find({
         "teacher": ObjectId(current_user.id),
         "groups": group_oid
-    }))
+    })
+    disciplines = await cursor.to_list(length=100)
     
     return [{
         "id": str(discipline["_id"]),
@@ -86,17 +88,51 @@ async def get_group_disciplines(
 # Получение списка студентов для выбранной группы
 @router.get("/students", summary="Получение списка студентов группы")
 async def get_group_students(
-    group_name: str = Query(..., description="Название группы"),
+    group_name: Optional[str] = Query(None, description="Название группы"),
+    group_id: Optional[str] = Query(None, description="ID группы"),
     current_user: TokenData = Depends(get_current_active_user),
     check_teacher: None = Depends(check_roles([UserRole.TEACHER, UserRole.HEAD_OF_DEPARTMENT]))
 ) -> List[dict]:
     """
-    Получение списка студентов, обучающихся в выбранной группе
+    Получение списка студентов, обучающихся в выбранной группе.
+    Можно указать название группы (group_name) или ID группы (group_id).
     """
-    logger.info(f"Запрос на получение студентов группы '{group_name}'")
+    # Проверяем, что указан хотя бы один параметр
+    if not group_name and not group_id:
+        logger.error("Не указан ни ID группы, ни название группы")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Необходимо указать либо название группы (group_name), либо ID группы (group_id)"
+        )
+    
+    # Если указан ID группы, получаем название группы
+    target_group_name = None
+    if group_id:
+        logger.info(f"Поиск группы по ID: {group_id}")
+        try:
+            group = await groups_collection.find_one({"_id": ObjectId(group_id)})
+            if not group:
+                logger.error(f"Группа с ID {group_id} не найдена")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Группа с ID {group_id} не найдена"
+                )
+            target_group_name = group["name"]
+            logger.info(f"Найдена группа: {target_group_name}")
+        except Exception as e:
+            logger.error(f"Ошибка при поиске группы по ID {group_id}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ошибка при поиске группы: {str(e)}"
+            )
+    else:
+        target_group_name = group_name
+    
+    logger.info(f"Запрос на получение студентов группы '{target_group_name}'")
     
     # Находим студентов группы
-    students = list(users_collection.find({"role": UserRole.STUDENT, "group": group_name}))
+    cursor = users_collection.find({"role": UserRole.STUDENT, "group": target_group_name})
+    students = await cursor.to_list(length=100)
     logger.info(f"Найдено студентов: {len(students)}")
     
     result = [{
@@ -144,7 +180,7 @@ async def get_attendance_records(
         )
     
     # Проверяем, что дисциплина принадлежит преподавателю
-    discipline = disciplines_collection.find_one({
+    discipline = await disciplines_collection.find_one({
         "_id": discipline_oid,
         "teacher": ObjectId(current_user.id)
     })
@@ -158,7 +194,8 @@ async def get_attendance_records(
     
     # Получаем студентов группы
     logger.info(f"Ищем студентов в группе '{group_name}'")
-    students = list(users_collection.find({"role": UserRole.STUDENT, "group": group_name}))
+    cursor = users_collection.find({"role": UserRole.STUDENT, "group": group_name})
+    students = await cursor.to_list(length=100)
     logger.info(f"Найдено студентов в группе '{group_name}': {len(students)}")
     
     # Выводим имена студентов для отладки
@@ -172,10 +209,11 @@ async def get_attendance_records(
     attendance_records = {}
     
     # Получаем все записи посещаемости для этой дисциплины и даты
-    all_records = list(attendance_collection.find({
+    cursor = attendance_collection.find({
         "discipline_id": discipline_id,
         "date": attendance_datetime,
-    }))
+    })
+    all_records = await cursor.to_list(length=100)
     
     logger.info(f"Найдено записей о посещаемости для дисциплины {discipline_id} на дату {attendance_date}: {len(all_records)}")
     for record in all_records:
@@ -429,7 +467,7 @@ async def student_mark_attendance(
     # Упрощенная версия обработки
     try:
         # Получаем студента
-        student = users_collection.find_one({"_id": ObjectId(current_user.id)})
+        student = await users_collection.find_one({"_id": ObjectId(current_user.id)})
         if not student:
             logger.error(f"Студент с ID {current_user.id} не найден")
             raise HTTPException(
@@ -454,7 +492,7 @@ async def student_mark_attendance(
         
         # Находим дисциплину
         try:
-            discipline = disciplines_collection.find_one({"_id": ObjectId(data["subjectId"])})
+            discipline = await disciplines_collection.find_one({"_id": ObjectId(data["subjectId"])})
             if not discipline:
                 logger.error(f"Дисциплина с ID {data['subjectId']} не найдена")
                 raise HTTPException(
@@ -501,7 +539,7 @@ async def student_mark_attendance(
         }
         
         # Сохраняем запись
-        result = attendance_collection.update_one(
+        result = await attendance_collection.update_one(
             {
                 "student_id": current_user.id,
                 "discipline_id": data["subjectId"],

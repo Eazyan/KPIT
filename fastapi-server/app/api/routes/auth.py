@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Вспомогательная функция для получения коллекции пользователей
+def get_user_collection():
+    return users_collection
+
 
 @router.post("/login", response_model=Any, summary="Вход пользователя", status_code=status.HTTP_200_OK)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()) -> Any:
@@ -37,7 +41,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         HTTPException: Если предоставлены неверные учетные данные
     """
     logger.info(f"Попытка входа для пользователя: {form_data.username}")
-    user = users_collection.find_one({"email": form_data.username})
+    user = await users_collection.find_one({"email": form_data.username})
     
     if not user:
         logger.warning(f"Пользователь не найден: {form_data.username}")
@@ -93,7 +97,8 @@ async def register_user(user_data: UserCreate = Body(..., description="Данн�
     logger.info(f"Попытка регистрации пользователя с email: {user_data.email}")
     
     # Проверка, существует ли пользователь с таким email
-    if users_collection.find_one({"email": user_data.email}):
+    existing_user = await users_collection.find_one({"email": user_data.email})
+    if existing_user:
         logger.warning(f"Пользователь с email {user_data.email} уже существует")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -124,10 +129,10 @@ async def register_user(user_data: UserCreate = Body(..., description="Данн�
         }
         
         # Добавление пользователя в базу данных
-        result = users_collection.insert_one(user_in_db)
+        result = await users_collection.insert_one(user_in_db)
         
         # Получение созданного пользователя
-        created_user = users_collection.find_one({"_id": result.inserted_id})
+        created_user = await users_collection.find_one({"_id": result.inserted_id})
         
         if not created_user:
             logger.error(f"Ошибка при создании пользователя: {user_data.email}")
@@ -227,7 +232,7 @@ async def get_user_profile(
             else:
                 object_id = user_id
                 
-            user = users_collection.find_one({"_id": object_id})
+            user = await users_collection.find_one({"_id": object_id})
         except Exception as e:
             logger.exception(f"Ошибка при поиске пользователя в базе: {str(e)}")
             raise HTTPException(
