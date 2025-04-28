@@ -1,11 +1,11 @@
-FROM node:16-alpine
+FROM node:18-alpine
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package*.json ./
 
-RUN npm install --save @types/recharts
+RUN npm install
+RUN npm install --save-dev crypto-browserify stream-browserify
 
 # Для режима разработки и горячей перезагрузки
 ENV CHOKIDAR_USEPOLLING=true

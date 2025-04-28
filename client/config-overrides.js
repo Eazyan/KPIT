@@ -1,10 +1,11 @@
 const webpack = require('webpack');
 
 module.exports = function override(config) {
-  // Добавляем полифилл для буфера
   config.resolve.fallback = {
     ...config.resolve.fallback,
-    "buffer": require.resolve("buffer/"),
+    "buffer": require.resolve("buffer/")//,
+    // "crypto": require.resolve("crypto-browserify"),
+    // "stream": require.resolve("stream-browserify")
   };
   
   // Добавляем плагин для предоставления Buffer

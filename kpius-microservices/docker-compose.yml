@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # MongoDB - база данных
+  mongodb:
+    image: mongo:6.0
+    container_name: kpius-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=kpiusdb
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # RabbitMQ - очередь сообщений для связи между сервисами
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: kpius-rabbitmq
+    ports:
+      - "5672:5672"  # AMQP порт
+      - "15672:15672"  # Порт веб-интерфейса управления
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # Auth Service - сервис аутентификации
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: kpius-auth-service
+    ports:
+      - "5001:5000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - JWT_SECRET=your_jwt_secret_key
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - ALGORITHM=HS256
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      - mongodb
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - kpius-network
+    volumes:
+      - ./auth-service:/app
+
+  # Attendance Service - сервис учета посещаемости
+  attendance-service:
+    build:
+      context: ./attendance-service
+      dockerfile: Dockerfile
+    container_name: kpius-attendance-service
+    ports:
+      - "5002:5002"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - SERVICE_PORT=5002
+    depends_on:
+      - mongodb
+      - rabbitmq
+      - auth-service
+    restart: unless-stopped
+    networks:
+      - kpius-network
+    volumes:
+      - ./attendance-service:/app
+
+  # API Gateway - шлюз для маршрутизации запросов
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: kpius-api-gateway
+    ports:
+      - "6000:5000"
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:5000
+      - ATTENDANCE_SERVICE_URL=http://attendance-service:5002
+    depends_on:
+      - auth-service
+      - attendance-service
+    restart: unless-stopped
+    networks:
+      - kpius-network
+    volumes:
+      - ./api-gateway:/app
+
+  # Client - фронтенд приложение
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: kpius-client
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:6000/api
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+    networks:
+      - kpius-network
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+
+volumes:
+  mongodb_data:
+  rabbitmq_data:
+
+networks:
+  kpius-network:
+    driver: bridge 
