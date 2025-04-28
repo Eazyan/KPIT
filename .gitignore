@@ -1,0 +1,5 @@
+/backend/venv
+/client/node_modules
+/fastapi-server/app/core/__pycache__
+*.pyc
+/node_modules

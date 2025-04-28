@@ -1,0 +1,234 @@
+version: '3.8'
+
+services:
+  # База данных
+  mongodb:
+    image: mongo:4.4
+    container_name: kpius-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=kpiusdb
+    restart: unless-stopped
+    networks:
+      - kpius-network
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.runCommand({ ping: 1 })"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: ["--wiredTigerCacheSizeGB=1.5"]
+
+  # Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: kpius-rabbitmq
+    ports:
+      - "5672:5672"  # AMQP порт
+      - "15672:15672"  # Порт веб-интерфейса управления
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: kpius-api-gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./services/api-gateway:/app
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - USER_SERVICE_URL=http://user-service:8002
+      - ATTENDANCE_SERVICE_URL=http://attendance-service:8003
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8004
+      - REPORTING_SERVICE_URL=http://reporting-service:8005
+      - JWT_SECRET=your-secret-key
+      - CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      auth-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      attendance-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      reporting-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: kpius-auth-service
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./services/auth-service:/app
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - JWT_SECRET=your-secret-key
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # User Service
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: kpius-user-service
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./services/user-service:/app
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - JWT_SECRET=your-secret-key
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # Attendance Service
+  attendance-service:
+    build:
+      context: ./services/attendance-service
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: kpius-attendance-service
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./services/attendance-service:/app
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - JWT_SECRET=your-secret-key
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: kpius-notification-service
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./services/notification-service:/app
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - JWT_SECRET=your-secret-key
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # Reporting Service
+  reporting-service:
+    build:
+      context: ./services/reporting-service
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: kpius-reporting-service
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./services/reporting-service:/app
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=kpiusdb
+      - JWT_SECRET=your-secret-key
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: kpius-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+    networks:
+      - kpius-network
+
+volumes:
+  mongodb_data:
+  rabbitmq_data:
+
+networks:
+  kpius-network:
+    driver: bridge 
