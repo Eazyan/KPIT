@@ -5,7 +5,7 @@ import { UserRole } from '../types';
 import { Buffer } from 'buffer';
 
 // Настройки API
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5005/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 interface User {
   _id: string;
@@ -184,12 +184,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setError(null);
     
     try {
-      const formData = new URLSearchParams();
-      formData.append('username', email);
-      formData.append('password', password);
+      const loginData = new URLSearchParams();
+      loginData.append('username', email);
+      loginData.append('password', password);
       
       // Используем напрямую axios вместо api, чтобы обойти интерцепторы при логине
-      const response = await axios.post(`${API_URL}/auth/login`, formData, {
+      const response = await axios.post(`${API_URL}/api/auth/login`, loginData, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
@@ -201,8 +201,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
       
       // Сохраняем данные пользователя
-      setUser(response.data);
-      localStorage.setItem('user', JSON.stringify(response.data));
+      const userData = {
+        _id: response.data.user?.id || '',
+        name: response.data.user?.name || '',
+        email: response.data.user?.email || email,
+        role: response.data.user?.role || 'student',
+        token: response.data.token
+      };
+      
+      setUser(userData);
+      localStorage.setItem('user', JSON.stringify(userData));
       localStorage.setItem('userToken', response.data.token);
     } catch (error: any) {
       setError(error.response?.data?.detail || 'Ошибка при входе в систему');

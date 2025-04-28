@@ -56,10 +56,10 @@ const LoginPage: React.FC = () => {
     } catch (err: any) {
       console.error('Ошибка при входе:', err);
       const errorMessage = err.response?.data?.detail || 
+                         err.response?.data?.message ||
                          err.message || 
                          'Ошибка при входе в систему. Проверьте данные и попробуйте снова.';
       setError(errorMessage);
-    } finally {
       setLoading(false);
       setIsSubmitting(false);
     }

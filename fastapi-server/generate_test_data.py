@@ -173,7 +173,7 @@ def connect_db():
         
         return db, users_collection, groups_collection, disciplines_collection, grades_collection
 
-def create_test_data(count=100, clear_db=False):
+async def create_test_data(count=100, clear_db=False):
     """Генерирует все тестовые данные - пользователей, группы, дисциплины"""
     try:
         # Подключаемся к базе данных
@@ -182,10 +182,10 @@ def create_test_data(count=100, clear_db=False):
         if clear_db:
             # Очистка коллекций
             logger.info("Очистка существующих данных...")
-            users_collection.delete_many({})
-            groups_collection.delete_many({})
-            disciplines_collection.delete_many({})
-            grades_collection.delete_many({})
+            await users_collection.delete_many({})
+            await groups_collection.delete_many({})
+            await disciplines_collection.delete_many({})
+            await grades_collection.delete_many({})
         
         # Создаем группы
         logger.info("Создание учебных групп...")
@@ -198,25 +198,18 @@ def create_test_data(count=100, clear_db=False):
         ]
         
         groups = []
-        group_names = []
-        for i, specialization in enumerate(specializations):
-            for course in range(1, 5):  # 4 курса
-                group_name = generate_student_group(course, specialization)
-                department = DEPARTMENT_NAMES[min(i, len(DEPARTMENT_NAMES)-1)]
-                
+        for course in range(1, 5):
+            for spec in specializations:
+                group_name = generate_student_group(course, spec)
                 group = {
                     "name": group_name,
-                    "department": department,
-                    "specialization": specialization,
                     "course": course,
-                    "created_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow()
+                    "specialization": spec,
+                    "created_at": datetime.now(),
+                    "updated_at": datetime.now()
                 }
-                
-                result = groups_collection.insert_one(group)
+                result = await groups_collection.insert_one(group)
                 groups.append({"id": result.inserted_id, "data": group})
-                group_names.append(group_name)
-                logger.info(f"Создана группа: {group_name}")
         
         # Создаем предопределенных пользователей
         logger.info("Создание предопределенных пользователей...")
@@ -252,7 +245,7 @@ def create_test_data(count=100, clear_db=False):
                 "email": "student@dvfu.ru",
                 "password_hash": hash_password("student123"),
                 "role": "student" if not APP_IMPORTS_AVAILABLE else UserRole.STUDENT,
-                "group": group_names[0],
+                "group": groups[0]["data"]["name"],
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
@@ -260,12 +253,12 @@ def create_test_data(count=100, clear_db=False):
         
         user_ids = []
         for user in default_users:
-            result = users_collection.insert_one(user)
+            result = await users_collection.insert_one(user)
             user_ids.append(result.inserted_id)
             logger.info(f"Создан пользователь: {user['name']} ({user['email']})")
         
         # Получаем ID тестового преподавателя
-        test_teacher = users_collection.find_one({"email": "teacher@dvfu.ru"})
+        test_teacher = await users_collection.find_one({"email": "teacher@dvfu.ru"})
         test_teacher_id = test_teacher["_id"] if test_teacher else None
         
         # Генерируем преподавателей (10% от общего числа)
@@ -289,7 +282,7 @@ def create_test_data(count=100, clear_db=False):
                 "updated_at": datetime.utcnow()
             }
             
-            result = users_collection.insert_one(teacher)
+            result = await users_collection.insert_one(teacher)
             teachers.append({"id": result.inserted_id, "data": teacher})
             logger.info(f"Создан преподаватель: {full_name} ({email})")
         
@@ -319,7 +312,7 @@ def create_test_data(count=100, clear_db=False):
                     "updated_at": datetime.utcnow()
                 }
                 
-                result = disciplines_collection.insert_one(discipline)
+                result = await disciplines_collection.insert_one(discipline)
                 disciplines.append({"id": result.inserted_id, "data": discipline})
                 logger.info(f"Создана дисциплина: {subject_name} (преподаватель: test)")
         
@@ -345,7 +338,7 @@ def create_test_data(count=100, clear_db=False):
                     "updated_at": datetime.utcnow()
                 }
                 
-                result = disciplines_collection.insert_one(discipline)
+                result = await disciplines_collection.insert_one(discipline)
                 disciplines.append({"id": result.inserted_id, "data": discipline})
                 logger.info(f"Создана дисциплина: {subject_name} (преподаватель: {teacher['data']['name']})")
         
@@ -373,7 +366,7 @@ def create_test_data(count=100, clear_db=False):
                 "updated_at": datetime.utcnow()
             }
             
-            result = users_collection.insert_one(student)
+            result = await users_collection.insert_one(student)
             students.append({"id": result.inserted_id, "data": student})
             if i % 10 == 0:
                 logger.info(f"Создано студентов: {i+1}/{student_count}")
@@ -391,14 +384,14 @@ def create_test_data(count=100, clear_db=False):
         logger.info(f" - Дисциплин: {len(disciplines)}")
         
         # Генерация оценок
-        generate_test_grades()
+        await generate_test_grades()
         
     except Exception as e:
         logger.error(f"Ошибка при заполнении базы данных: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
 
-def generate_test_grades():
+async def generate_test_grades():
     """
     Генерирует тестовые оценки для студентов с улучшенной структурой,
     совместимой с компонентом журнала оценок GradeJournal.tsx
@@ -406,7 +399,7 @@ def generate_test_grades():
     logger.info("Генерация тестовых оценок...")
     
     # Находим тестового студента
-    test_student = users_collection.find_one({"email": "student@dvfu.ru"})
+    test_student = await users_collection.find_one({"email": "student@dvfu.ru"})
     if not test_student:
         logger.error("Тестовый студент не найден. Невозможно сгенерировать оценки.")
         return
@@ -415,11 +408,14 @@ def generate_test_grades():
     logger.info(f"Найден тестовый студент: {test_student['name']} (ID: {test_student_id})")
     
     # Удаляем все существующие оценки для тестового студента
-    result = grades_collection.delete_many({"student_id": str(test_student_id)})
+    result = await grades_collection.delete_many({"student_id": str(test_student_id)})
     logger.info(f"Удалено {result.deleted_count} старых оценок для тестового студента")
     
     # Находим все дисциплины
-    all_disciplines = list(disciplines_collection.find())
+    cursor = disciplines_collection.find()
+    all_disciplines = []
+    async for doc in cursor:
+        all_disciplines.append(doc)
     
     if not all_disciplines:
         logger.error("Дисциплины не найдены. Невозможно сгенерировать оценки.")
@@ -431,7 +427,7 @@ def generate_test_grades():
     for discipline in all_disciplines:
         # Добавляем поле discipline_id для совместимости с журналом
         if "_id" in discipline and "discipline_id" not in discipline:
-            disciplines_collection.update_one(
+            await disciplines_collection.update_one(
                 {"_id": discipline["_id"]},
                 {"$set": {
                     "discipline_id": str(discipline["_id"]),
@@ -441,7 +437,10 @@ def generate_test_grades():
             logger.info(f"Обновлена структура дисциплины: {discipline.get('name', 'Неизвестная дисциплина')}")
     
     # Обновляем дисциплины после изменений
-    all_disciplines = list(disciplines_collection.find())
+    cursor = disciplines_collection.find()
+    all_disciplines = []
+    async for doc in cursor:
+        all_disciplines.append(doc)
     
     # Генерируем даты для оценок (за последние 3 месяца)
     today = datetime.now()
@@ -461,7 +460,7 @@ def generate_test_grades():
         # Находим преподавателя дисциплины
         teacher_id = discipline.get("teacher")
         if not teacher_id:
-            teacher = users_collection.find_one({"role": "teacher"})
+            teacher = await users_collection.find_one({"role": "teacher"})
             teacher_id = teacher["_id"] if teacher else None
         
         # Количество оценок варьируется для разных дисциплин
@@ -499,13 +498,13 @@ def generate_test_grades():
                 "description": f"Оценка за {grade_type.lower()}",
                 "date": grade_date_str,
                 "weight": random.choice([0.5, 1.0, 1.5, 2.0]),  # Разные веса оценок для реалистичности
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(),
                 "created_by": str(teacher_id) if teacher_id else None
             }
             
-            result = grades_collection.insert_one(grade)
+            result = await grades_collection.insert_one(grade)
             # Добавляем id в формате, ожидаемом GradeItem
-            grades_collection.update_one(
+            await grades_collection.update_one(
                 {"_id": result.inserted_id},
                 {"$set": {"id": str(result.inserted_id)}}
             )
@@ -516,7 +515,7 @@ def generate_test_grades():
         # Вычисляем и обновляем среднюю оценку для дисциплины
         if discipline_grades:
             average_grade = sum(discipline_grades) / len(discipline_grades)
-            disciplines_collection.update_one(
+            await disciplines_collection.update_one(
                 {"_id": discipline["_id"]},
                 {"$set": {"average_grade": average_grade}}
             )
@@ -525,7 +524,10 @@ def generate_test_grades():
     logger.info(f"Сгенерировано {total_grades} оценок для тестового студента")
     
     # Генерируем оценки для других студентов для более полной аналитики
-    other_students = list(users_collection.find({"role": "student", "_id": {"$ne": test_student_id}}).limit(10))
+    cursor = users_collection.find({"role": "student", "_id": {"$ne": test_student_id}}).limit(10)
+    other_students = []
+    async for doc in cursor:
+        other_students.append(doc)
     
     for student in other_students:
         student_id = student["_id"]
@@ -542,7 +544,7 @@ def generate_test_grades():
             # Преподаватель дисциплины
             teacher_id = discipline.get("teacher")
             if not teacher_id:
-                teacher = users_collection.find_one({"role": "teacher"})
+                teacher = await users_collection.find_one({"role": "teacher"})
                 teacher_id = teacher["_id"] if teacher else None
             
             # От 3 до 8 оценок по каждой дисциплине
@@ -567,13 +569,13 @@ def generate_test_grades():
                     "description": f"Оценка за {grade_type.lower()}",
                     "date": grade_date_str,
                     "weight": random.choice([0.5, 1.0, 1.5, 2.0]),
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(),
                     "created_by": str(teacher_id) if teacher_id else None
                 }
                 
-                result = grades_collection.insert_one(grade)
+                result = await grades_collection.insert_one(grade)
                 # Добавляем id в формате, ожидаемом GradeItem
-                grades_collection.update_one(
+                await grades_collection.update_one(
                     {"_id": result.inserted_id},
                     {"$set": {"id": str(result.inserted_id)}}
                 )
@@ -586,26 +588,15 @@ def generate_test_grades():
     logger.info(f"Всего сгенерировано {total_grades} оценок")
 
 if __name__ == "__main__":
-    import argparse
+    import asyncio
     
-    parser = argparse.ArgumentParser(description='Генерация тестовых данных для системы КПиУС')
-    parser.add_argument('--count', type=int, default=100, help='Общее количество пользователей (включая предопределенных)')
-    parser.add_argument('--clear', action='store_true', help='Очистить базу данных перед заполнением')
-    parser.add_argument('--grades-only', action='store_true', help='Сгенерировать только оценки')
+    async def main():
+        try:
+            await create_test_data()
+            logger.info("Генерация тестовых данных успешно завершена")
+        except Exception as e:
+            logger.error(f"Ошибка при генерации тестовых данных: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
     
-    args = parser.parse_args()
-    
-    try:
-        if args.grades_only:
-            # Подключаемся к базе данных и генерируем только оценки
-            db, users_collection, groups_collection, disciplines_collection, grades_collection = connect_db()
-            generate_test_grades()
-        else:
-            # Генерируем все тестовые данные
-            create_test_data(count=args.count, clear_db=args.clear)
-            
-        logger.info("Генерация тестовых данных успешно завершена")
-    except Exception as e:
-        logger.error(f"Ошибка при генерации тестовых данных: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc()) 
+    asyncio.run(main()) 

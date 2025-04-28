@@ -59,8 +59,23 @@ const LoginForm: React.FC = () => {
     try {
       await login(formData.email, formData.password);
       navigate('/');
-    } catch (error) {
-      // Ошибка уже будет установлена в AuthContext
+    } catch (error: any) {
+      console.error('Ошибка при входе:', error);
+      let errorMessage = 'Ошибка при входе в систему. Проверьте данные и попробуйте снова.';
+      
+      if (error.response?.data?.detail) {
+        if (Array.isArray(error.response.data.detail)) {
+          errorMessage = error.response.data.detail.map((err: any) => err.msg).join(', ');
+        } else {
+          errorMessage = error.response.data.detail;
+        }
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      setFormError(errorMessage);
     }
   };
   

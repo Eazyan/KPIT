@@ -104,7 +104,7 @@ const AppBar: React.FC<AppBarProps> = ({ onDrawerToggle }) => {
               aria-expanded={open ? 'true' : undefined}
             >
               <Avatar sx={{ width: 32, height: 32, bgcolor: theme.palette.primary.main }}>
-                {user.name.charAt(0)}
+                {user?.name ? user.name.charAt(0) : '?'}
               </Avatar>
             </IconButton>
             
@@ -128,10 +128,10 @@ const AppBar: React.FC<AppBarProps> = ({ onDrawerToggle }) => {
             >
               <Box sx={{ px: 2, py: 1 }}>
                 <Typography variant="subtitle1" fontWeight={500}>
-                  {user.name}
+                  {user?.name || 'Пользователь'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {user.email}
+                  {user?.email || ''}
                 </Typography>
               </Box>
               

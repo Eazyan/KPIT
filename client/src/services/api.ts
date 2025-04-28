@@ -163,7 +163,15 @@ const authAPI = {
   // Функция для входа в систему
   async login(email: string, password: string): Promise<LoginResponse> {
     try {
-      const response = await api.post('/auth/login', { email, password });
+      const formData = new URLSearchParams();
+      formData.append('username', email);
+      formData.append('password', password);
+      
+      const response = await api.post('/auth/login', formData, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      });
       
       // Сохраняем токен в заголовках для последующих запросов
       api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
