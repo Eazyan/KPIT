@@ -4,7 +4,8 @@ python-jose[cryptography]
 passlib[bcrypt]
 bcrypt
 python-multipart
-pydantic
+pydantic[email]
 pydantic-settings
 python-dotenv
-motor 
+motor
+email-validator 

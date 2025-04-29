@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # База данных для тестов
+  mongodb-test:
+    image: mongo:4.4
+    container_name: kpius-mongodb-test
+    ports:
+      - "27018:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=kpius_test
+    command: ["--quiet", "--logpath=/dev/null"]
+    networks:
+      - test-network
+
+  # Auth Service Tests
+  auth-service-tests:
+    build:
+      context: ../services/auth-service
+      dockerfile: Dockerfile.test
+    container_name: kpius-auth-service-tests
+    volumes:
+      - ../services/auth-service:/app
+    environment:
+      - MONGODB_URL=mongodb://mongodb-test:27017
+      - DATABASE_NAME=kpius_test
+      - JWT_SECRET=test-secret-key
+      - PYTHONPATH=/app
+    depends_on:
+      - mongodb-test
+    networks:
+      - test-network
+    command: ["pytest", "-v", "--cov=app", "--cov-report=term-missing"]
+
+  # User Service Tests
+  user-service-tests:
+    build:
+      context: ../services/user-service
+      dockerfile: Dockerfile.test
+    container_name: kpius-user-service-tests
+    volumes:
+      - ../services/user-service:/app
+    environment:
+      - MONGODB_URL=mongodb://mongodb-test:27017
+      - DATABASE_NAME=kpius_test
+      - JWT_SECRET=test-secret-key
+      - PYTHONPATH=/app
+    depends_on:
+      - mongodb-test
+    networks:
+      - test-network
+    command: ["pytest", "-v", "--cov=app", "--cov-report=term-missing"]
+
+networks:
+  test-network:
+    driver: bridge 

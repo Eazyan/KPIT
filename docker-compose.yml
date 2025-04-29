@@ -20,7 +20,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    command: ["--wiredTigerCacheSizeGB=1.5"]
+    command: ["--wiredTigerCacheSizeGB=1.5", "--quiet", "--logpath=/dev/null"]
 
   # Message Broker
   rabbitmq:
@@ -30,11 +30,10 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-    environment:
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./services/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
+      - ./services/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
     restart: unless-stopped
     networks:
       - kpius-network
