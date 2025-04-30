@@ -1,108 +1,121 @@
-from typing import Any, Dict, Optional, Union, List
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from motor.motor_asyncio import AsyncIOMotorDatabase
-
+from typing import Optional, List
+from bson import ObjectId
+from app.db.mongodb import MongoDB
+from app.schemas.user import (
+    UserCreate, UserUpdate, UserProfileCreate, 
+    UserProfileUpdate, UserRoleCreate, UserRoleUpdate, 
+    UserInDB, UserProfile
+)
 from app.core.security import get_password_hash, verify_password
-from app.crud.base import CRUDBase
-from app.models.user import User
-from app.schemas.user import UserCreate, UserUpdate
 
-class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
-    async def get_by_email(self, db: AsyncSession, *, email: str) -> Optional[User]:
-        result = await db.execute(select(User).where(User.email == email))
-        return result.scalar_one_or_none()
+class UserCRUD:
+    def __init__(self, db: MongoDB):
+        self.db = db
+        self.collection = db.get_collection("users")
+        self.profiles_collection = db.get_collection("profiles")
+        self.roles_collection = db.get_collection("roles")
 
-    async def create(self, db: AsyncSession, *, obj_in: UserCreate) -> User:
-        db_obj = User(
-            email=obj_in.email,
-            hashed_password=get_password_hash(obj_in.password),
-            full_name=obj_in.full_name,
-            is_superuser=obj_in.is_superuser,
+    async def get_by_id(self, user_id: str) -> Optional[UserInDB]:
+        user = await self.collection.find_one({"_id": ObjectId(user_id)})
+        if user:
+            return UserInDB(**user)
+        return None
+
+    async def get_by_email(self, email: str) -> Optional[UserInDB]:
+        user = await self.collection.find_one({"email": email})
+        if user:
+            return UserInDB(**user)
+        return None
+
+    async def get_by_username(self, username: str) -> Optional[UserInDB]:
+        user = await self.collection.find_one({"username": username})
+        if user:
+            return UserInDB(**user)
+        return None
+
+    async def get_multi(self, skip: int = 0, limit: int = 100) -> List[UserInDB]:
+        users = await self.collection.find().skip(skip).limit(limit).to_list(length=limit)
+        return [UserInDB(**user) for user in users]
+
+    async def create(self, user_in: UserCreate) -> UserInDB:
+        hashed_password = get_password_hash(user_in.password)
+        user_dict = user_in.dict(exclude={"password"})
+        user_dict["hashed_password"] = hashed_password
+        result = await self.collection.insert_one(user_dict)
+        user_dict["_id"] = result.inserted_id
+        return UserInDB(**user_dict)
+
+    async def update(self, user_id: str, user_in: UserUpdate) -> Optional[UserInDB]:
+        user_dict = user_in.dict(exclude_unset=True)
+        if user_dict.get("password"):
+            user_dict["hashed_password"] = get_password_hash(user_dict.pop("password"))
+        result = await self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": user_dict}
         )
-        db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
-        return db_obj
+        if result.modified_count:
+            return await self.get_by_id(user_id)
+        return None
 
-    async def update(
-        self, db: AsyncSession, *, db_obj: User, obj_in: Union[UserUpdate, Dict[str, Any]]
-    ) -> User:
-        if isinstance(obj_in, dict):
-            update_data = obj_in
-        else:
-            update_data = obj_in.dict(exclude_unset=True)
-        if update_data.get("password"):
-            hashed_password = get_password_hash(update_data["password"])
-            del update_data["password"]
-            update_data["hashed_password"] = hashed_password
-        return await super().update(db, db_obj=db_obj, obj_in=update_data)
+    async def delete(self, user_id: str) -> bool:
+        result = await self.collection.delete_one({"_id": ObjectId(user_id)})
+        return result.deleted_count > 0
 
-    async def authenticate(self, db: AsyncSession, *, email: str, password: str) -> Optional[User]:
-        user = await self.get_by_email(db, email=email)
+    async def authenticate(self, username: str, password: str) -> Optional[UserInDB]:
+        user = await self.get_by_username(username)
         if not user:
             return None
         if not verify_password(password, user.hashed_password):
             return None
         return user
 
-    def is_active(self, user: User) -> bool:
-        return user.is_active
+    # Профили пользователей
+    async def get_profile(self, user_id: str) -> Optional[UserProfile]:
+        profile = await self.profiles_collection.find_one({"user_id": ObjectId(user_id)})
+        if profile:
+            return UserProfile(**profile)
+        return None
 
-    def is_superuser(self, user: User) -> bool:
-        return user.is_superuser
+    async def create_profile(self, user_id: str, profile_in: UserProfileCreate) -> UserProfile:
+        profile_dict = profile_in.dict()
+        profile_dict["user_id"] = ObjectId(user_id)
+        result = await self.profiles_collection.insert_one(profile_dict)
+        profile_dict["_id"] = result.inserted_id
+        return UserProfile(**profile_dict)
 
-async def get_user_by_email(db: AsyncIOMotorDatabase, email: str) -> Optional[Dict[str, Any]]:
-    user = await db.users.find_one({"email": email})
-    return user
+    async def update_profile(self, user_id: str, profile_in: UserProfileUpdate) -> Optional[UserProfile]:
+        profile_dict = profile_in.dict(exclude_unset=True)
+        result = await self.profiles_collection.update_one(
+            {"user_id": ObjectId(user_id)},
+            {"$set": profile_dict}
+        )
+        if result.modified_count:
+            return await self.get_profile(user_id)
+        return None
 
-async def get_user(db: AsyncIOMotorDatabase, user_id: str) -> Optional[Dict[str, Any]]:
-    user = await db.users.find_one({"_id": user_id})
-    return user
+    # Роли пользователей
+    async def get_role(self, role_id: str) -> Optional[dict]:
+        return await self.roles_collection.find_one({"_id": ObjectId(role_id)})
 
-async def get_users(
-    db: AsyncIOMotorDatabase,
-    skip: int = 0,
-    limit: int = 100
-) -> List[Dict[str, Any]]:
-    cursor = db.users.find().skip(skip).limit(limit)
-    users = await cursor.to_list(length=limit)
-    return users
+    async def create_role(self, role_in: UserRoleCreate) -> dict:
+        role_dict = role_in.dict()
+        result = await self.roles_collection.insert_one(role_dict)
+        role_dict["_id"] = result.inserted_id
+        return role_dict
 
-async def create_user(db: AsyncIOMotorDatabase, *, obj_in: UserCreate) -> Dict[str, Any]:
-    db_obj = {
-        "email": obj_in.email,
-        "hashed_password": get_password_hash(obj_in.password),
-        "full_name": obj_in.full_name,
-        "is_active": True,
-        "role": "user"
-    }
-    result = await db.users.insert_one(db_obj)
-    db_obj["id"] = str(result.inserted_id)
-    return db_obj
+    async def update_role(self, role_id: str, role_in: UserRoleUpdate) -> Optional[dict]:
+        role_dict = role_in.dict(exclude_unset=True)
+        result = await self.roles_collection.update_one(
+            {"_id": ObjectId(role_id)},
+            {"$set": role_dict}
+        )
+        if result.modified_count:
+            return await self.get_role(role_id)
+        return None
 
-async def update_user(
-    db: AsyncIOMotorDatabase,
-    email: str,
-    obj_in: Union[UserUpdate, Dict[str, Any]]
-) -> Dict[str, Any]:
-    if isinstance(obj_in, dict):
-        update_data = obj_in
-    else:
-        update_data = obj_in.dict(exclude_unset=True)
-    if update_data.get("password"):
-        hashed_password = get_password_hash(update_data["password"])
-        del update_data["password"]
-        update_data["hashed_password"] = hashed_password
-    
-    result = await db.users.update_one(
-        {"email": email},
-        {"$set": update_data}
-    )
-    if result.modified_count == 0:
-        raise ValueError("Пользователь не найден")
-    
-    user = await get_user_by_email(db, email)
-    return user
+    async def delete_role(self, role_id: str) -> bool:
+        result = await self.roles_collection.delete_one({"_id": ObjectId(role_id)})
+        return result.deleted_count > 0
 
-user = CRUDUser(User) 
+# Создаем экземпляр класса для использования в других модулях
+user_crud = UserCRUD(MongoDB())

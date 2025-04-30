@@ -1,1 +1,6 @@
-from app.crud.user import user 
+"""
+CRUD operations package initialization.
+"""
+from app.crud.user import UserCRUD, user_crud
+
+__all__ = ["UserCRUD", "user_crud"] 

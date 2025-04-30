@@ -329,3 +329,78 @@ SERVICE_NAME=auth-service
    - Хранение конфигурации в Git
    - Использование секретов Docker
    - Ротация ключей 
+
+# KPIT
+
+Микросервисная архитектура для управления пользователями и аутентификацией.
+
+## Сервисы
+
+### Auth Service
+Сервис аутентификации, отвечающий за:
+- Регистрацию пользователей
+- Аутентификацию пользователей
+- Управление токенами доступа
+- Проверку прав доступа
+
+### User Service
+Сервис управления пользователями, отвечающий за:
+- Управление профилями пользователей
+- Хранение дополнительной информации о пользователях
+- Управление ролями и правами доступа
+
+## Запуск
+
+1. Клонируйте репозиторий:
+```bash
+git clone https://github.com/your-username/kpit.git
+cd kpit
+```
+
+2. Запустите сервисы с помощью Docker Compose:
+```bash
+docker-compose up -d
+```
+
+3. Сервисы будут доступны по следующим адресам:
+- Auth Service: http://localhost:8001
+- User Service: http://localhost:8000
+
+## API Documentation
+
+### Auth Service
+- Swagger UI: http://localhost:8001/docs
+- ReDoc: http://localhost:8001/redoc
+
+### User Service
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+## Разработка
+
+### Требования
+- Python 3.9+
+- Docker
+- Docker Compose
+
+### Установка зависимостей
+```bash
+cd services/auth-service
+pip install -r requirements.txt
+
+cd ../user-service
+pip install -r requirements.txt
+```
+
+### Запуск тестов
+```bash
+cd services/auth-service
+pytest
+
+cd ../user-service
+pytest
+```
+
+## Лицензия
+
+MIT 

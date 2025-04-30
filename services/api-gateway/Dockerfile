@@ -4,19 +4,19 @@ FROM python:3.11-slim as builder
 WORKDIR /app
 
 # Установка зависимостей для сборки
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    python3-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc python3-dev curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Копирование файлов зависимостей
 COPY requirements.txt .
 
 # Создание виртуального окружения и установка зависимостей
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Финальный этап
 FROM python:3.11-slim

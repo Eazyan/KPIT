@@ -1,1 +1,6 @@
-from app.models.user import User 
+"""
+Models package initialization.
+"""
+from app.schemas.user import User
+
+__all__ = ["User"] 

@@ -1,17 +1,24 @@
-FROM node:16-alpine
+FROM node:18-alpine
 
 WORKDIR /app
 
+# Копируем только файлы зависимостей для лучшего кэширования
 COPY package.json package-lock.json ./
-RUN npm ci
 
-RUN npm install --save @types/recharts
+# Установка зависимостей с использованием кэша для ускорения
+RUN npm config set cache /app/.npm-cache && \
+    npm ci --prefer-offline --no-optional && \
+    npm install --save @types/recharts && \
+    npm cache clean --force
 
-# Для режима разработки и горячей перезагрузки
-ENV CHOKIDAR_USEPOLLING=true
-ENV WDS_SOCKET_PORT=0
-ENV NODE_ENV=development
+ENV CHOKIDAR_USEPOLLING=true \
+    WDS_SOCKET_PORT=0 \
+    NODE_ENV=development \
+    FAST_REFRESH=true \
+    GENERATE_SOURCEMAP=true \
+    SKIP_PREFLIGHT_CHECK=true
 
+# Копируем исходный код
 COPY . .
 
 EXPOSE 3000

@@ -16,8 +16,6 @@ import TeacherGrades from './pages/Grades';
 import Layout from './components/Layout/Layout';
 import './App.css';
 
-// Это тестовый комментарий для проверки горячей перезагрузки
-
 function App() {
   // Тестовая переменная
   const testHotReload = "Обновление работает!";
