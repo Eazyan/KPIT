@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Установка зависимостей
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Установка зависимостей для тестирования
+RUN pip install --no-cache-dir pytest pytest-asyncio pytest-cov httpx
+
+# Копирование кода
+COPY . .
+
+CMD ["pytest", "-v", "--cov=app", "--cov-report=term-missing"] 

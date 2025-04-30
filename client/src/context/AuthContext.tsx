@@ -184,19 +184,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setError(null);
     
     try {
-      const loginData = new URLSearchParams();
-      loginData.append('username', email);
-      loginData.append('password', password);
+      // Изменяем формат данных на объект вместо URLSearchParams
+      const loginData = {
+        email: email,
+        password: password
+      };
       
-      // Используем напрямую axios вместо api, чтобы обойти интерцепторы при логине
-      const response = await axios.post(`${API_URL}/api/auth/login`, loginData, {
+      // Используем /api/v1/auth/login вместо /api/auth/login
+      const response = await axios.post(`${API_URL}/api/v1/auth/login`, loginData, {
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
       });
       
       // Проверяем ответ
-      if (!response.data || !response.data.token) {
+      if (!response.data || !response.data.access_token) {
         throw new Error('Ошибка при входе: токен не получен');
       }
       
@@ -206,12 +208,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         name: response.data.user?.name || '',
         email: response.data.user?.email || email,
         role: response.data.user?.role || 'student',
-        token: response.data.token
+        token: response.data.access_token
       };
       
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('userToken', response.data.token);
+      localStorage.setItem('userToken', response.data.access_token);
     } catch (error: any) {
       setError(error.response?.data?.detail || 'Ошибка при входе в систему');
       throw error;

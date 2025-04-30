@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # База данных
   mongodb:
@@ -10,7 +8,7 @@ services:
     volumes:
       - mongodb_data:/data/db
     environment:
-      - MONGO_INITDB_DATABASE=kpiusdb
+      - MONGO_INITDB_DATABASE=${MONGO_INITDB_DATABASE}
     restart: unless-stopped
     networks:
       - kpius-network
@@ -20,7 +18,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    command: ["--wiredTigerCacheSizeGB=1.5"]
+    command: ["--wiredTigerCacheSizeGB=1.5", "--quiet", "--logpath=/dev/null"]
 
   # Message Broker
   rabbitmq:
@@ -30,11 +28,11 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-    environment:
-      - RABBITMQ_DEFAULT_USER=guest
-      - RABBITMQ_DEFAULT_PASS=guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS}
     restart: unless-stopped
     networks:
       - kpius-network
@@ -52,18 +50,18 @@ services:
       dockerfile: Dockerfile
     container_name: kpius-api-gateway
     ports:
-      - "8000:8000"
+      - "${API_GATEWAY_PORT}:${API_GATEWAY_PORT}"
     volumes:
       - ./services/api-gateway:/app
     environment:
-      - AUTH_SERVICE_URL=http://auth-service:8001
-      - USER_SERVICE_URL=http://user-service:8002
-      - ATTENDANCE_SERVICE_URL=http://attendance-service:8003
-      - NOTIFICATION_SERVICE_URL=http://notification-service:8004
-      - REPORTING_SERVICE_URL=http://reporting-service:8005
-      - JWT_SECRET=your-secret-key
-      - CORS_ORIGINS=http://localhost:3000
-      - NODE_ENV=development
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL}
+      - USER_SERVICE_URL=${USER_SERVICE_URL}
+      - ATTENDANCE_SERVICE_URL=${ATTENDANCE_SERVICE_URL}
+      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL}
+      - REPORTING_SERVICE_URL=${REPORTING_SERVICE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - NODE_ENV=${NODE_ENV}
     depends_on:
       auth-service:
         condition: service_started
@@ -88,15 +86,15 @@ services:
         - BUILDKIT_INLINE_CACHE=1
     container_name: kpius-auth-service
     ports:
-      - "8001:8001"
+      - "${AUTH_SERVICE_PORT}:${AUTH_SERVICE_PORT}"
     volumes:
       - ./services/auth-service:/app
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
-      - DATABASE_NAME=kpiusdb
-      - JWT_SECRET=your-secret-key
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
-      - CORS_ORIGINS=http://localhost:3000
+      - MONGODB_URL=${MONGODB_URL}
+      - DATABASE_NAME=${DATABASE_NAME}
+      - JWT_SECRET=${JWT_SECRET}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - CORS_ORIGINS=${CORS_ORIGINS}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -105,6 +103,12 @@ services:
     restart: unless-stopped
     networks:
       - kpius-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${AUTH_SERVICE_PORT}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # User Service
   user-service:
@@ -115,17 +119,20 @@ services:
         - BUILDKIT_INLINE_CACHE=1
     container_name: kpius-user-service
     ports:
-      - "8002:8002"
+      - "${USER_SERVICE_PORT}:${USER_SERVICE_PORT}"
     volumes:
       - ./services/user-service:/app
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
-      - DATABASE_NAME=kpiusdb
-      - JWT_SECRET=your-secret-key
+      - MONGODB_URL=${MONGODB_URL}
+      - DATABASE_NAME=${DATABASE_NAME}
+      - JWT_SECRET=${JWT_SECRET}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL}
     depends_on:
       mongodb:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      auth-service:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -140,13 +147,13 @@ services:
         - BUILDKIT_INLINE_CACHE=1
     container_name: kpius-attendance-service
     ports:
-      - "8003:8003"
+      - "${ATTENDANCE_SERVICE_PORT}:${ATTENDANCE_SERVICE_PORT}"
     volumes:
       - ./services/attendance-service:/app
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
-      - DATABASE_NAME=kpiusdb
-      - JWT_SECRET=your-secret-key
+      - MONGODB_URL=${MONGODB_URL}
+      - DATABASE_NAME=${DATABASE_NAME}
+      - JWT_SECRET=${JWT_SECRET}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -165,14 +172,14 @@ services:
         - BUILDKIT_INLINE_CACHE=1
     container_name: kpius-notification-service
     ports:
-      - "8004:8004"
+      - "${NOTIFICATION_SERVICE_PORT}:${NOTIFICATION_SERVICE_PORT}"
     volumes:
       - ./services/notification-service:/app
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
-      - DATABASE_NAME=kpiusdb
-      - JWT_SECRET=your-secret-key
-      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - MONGODB_URL=${MONGODB_URL}
+      - DATABASE_NAME=${DATABASE_NAME}
+      - JWT_SECRET=${JWT_SECRET}
+      - RABBITMQ_URL=${RABBITMQ_URL}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -191,13 +198,13 @@ services:
         - BUILDKIT_INLINE_CACHE=1
     container_name: kpius-reporting-service
     ports:
-      - "8005:8005"
+      - "${REPORTING_SERVICE_PORT}:${REPORTING_SERVICE_PORT}"
     volumes:
       - ./services/reporting-service:/app
     environment:
-      - MONGODB_URL=mongodb://mongodb:27017
-      - DATABASE_NAME=kpiusdb
-      - JWT_SECRET=your-secret-key
+      - MONGODB_URL=${MONGODB_URL}
+      - DATABASE_NAME=${DATABASE_NAME}
+      - JWT_SECRET=${JWT_SECRET}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -214,13 +221,13 @@ services:
       dockerfile: Dockerfile
     container_name: kpius-frontend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
     volumes:
       - ./client:/app
       - /app/node_modules
     environment:
-      - NODE_ENV=development
-      - REACT_APP_API_URL=http://localhost:8000
+      - NODE_ENV=${NODE_ENV}
+      - REACT_APP_API_URL=${REACT_APP_API_URL}
     command: npm start
     restart: unless-stopped
     networks:

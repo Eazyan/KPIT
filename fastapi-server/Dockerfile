@@ -1,13 +1,44 @@
-FROM python:3.9-slim
+# Этап сборки
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# Установка зависимостей
+# Установка зависимостей для сборки
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc python3-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Копирование файлов зависимостей
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Создание виртуального окружения и установка зависимостей
+RUN python -m venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Финальный этап
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Копирование виртуального окружения из builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Копирование проекта
 COPY . .
+
+# Установка переменных окружения
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
+# Создание непривилегированного пользователя
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
+USER appuser
 
 # Порт для FastAPI
 EXPOSE 5005
